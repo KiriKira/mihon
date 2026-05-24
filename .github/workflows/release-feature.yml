@@ -56,20 +56,14 @@ jobs:
             echo "KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
             echo "Using project keystore from secrets."
           else
-            keytool -genkeypair \
-              -alias mihon-ci \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storetype PKCS12 \
-              -keystore mihon-release.keystore.p12 \
-              -storepass android \
-              -keypass android \
-              -dname "CN=Mihon CI, OU=Mobile, O=Mihon, L=Remote, ST=Remote, C=US"
+            # Fall back to the persistent keystore committed under
+            # .github/keystore/ci.p12 so successive CI builds share the same
+            # signing certificate and can upgrade each other in place.
+            cp .github/keystore/ci.p12 mihon-release.keystore.p12
             echo "KEY_ALIAS=mihon-ci" >> "$GITHUB_ENV"
             echo "KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
-            echo "::warning::No signing secrets configured; using throwaway CI keystore. APKs cannot upgrade installs signed with a different certificate."
+            echo "Using committed persistent CI keystore (.github/keystore/ci.p12)."
           fi
 
       - name: Sign release APKs
@@ -130,7 +124,7 @@ jobs:
             echo
             echo "**Feature:** 智能识别 \"拆分双页\" 时的真正大跨页，自动跳过拆分。"
             echo
-            echo "- \`*-signed.apk\`: 使用项目 keystore（若已配置 \`ANDROID_KEYSTORE_BASE64\` secret）；否则使用临时 CI keystore（无法覆盖安装其他证书签名的旧版本）。"
+            echo "- \`*-signed.apk\`: 使用项目 keystore（若已配置 \`ANDROID_KEYSTORE_BASE64\` secret），否则使用仓库内置 keystore (\`.github/keystore/ci.p12\`)。同一 keystore 下后续构建可直接覆盖安装升级。"
           } > "$NOTES_FILE"
           gh release create "$RELEASE_TAG" \
             --title "$RELEASE_NAME" \

@@ -223,6 +223,9 @@ class WebtoonPageHolder(
         if (viewer.config.dualPageSplit) {
             val isDoublePage = ImageUtil.isWideImage(imageSource)
             if (isDoublePage) {
+                if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
+                    return imageSource
+                }
                 val upperSide = if (viewer.config.dualPageInvert) ImageUtil.Side.LEFT else ImageUtil.Side.RIGHT
                 return ImageUtil.splitAndMerge(imageSource, upperSide)
             }

@@ -67,6 +67,9 @@ class WebtoonConfig(
         readerPreferences.dualPageInvertWebtoon
             .register({ dualPageInvert = it }, { imagePropertyChangedListener?.invoke() })
 
+        readerPreferences.dualPageSplitSkipSpread
+            .register({ dualPageSkipSpread = it }, { imagePropertyChangedListener?.invoke() })
+
         readerPreferences.dualPageRotateToFitWebtoon
             .register(
                 { dualPageRotateToFit = it },

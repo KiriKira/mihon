@@ -120,6 +120,10 @@ private fun ColumnScope.PagerViewerSettings(screenModel: ReaderSettingsScreenMod
             label = stringResource(MR.strings.pref_dual_page_invert),
             pref = screenModel.preferences.dualPageInvertPaged,
         )
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_dual_page_skip_spread),
+            pref = screenModel.preferences.dualPageSplitSkipSpread,
+        )
     }
 
     val dualPageRotateToFit by screenModel.preferences.dualPageRotateToFit.collectAsState()
@@ -175,6 +179,10 @@ private fun ColumnScope.WebtoonViewerSettings(screenModel: ReaderSettingsScreenM
     )
 
     if (dualPageSplitWebtoon) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_dual_page_skip_spread),
+            pref = screenModel.preferences.dualPageSplitSkipSpread,
+        )
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_invert),
             pref = screenModel.preferences.dualPageInvertWebtoon,

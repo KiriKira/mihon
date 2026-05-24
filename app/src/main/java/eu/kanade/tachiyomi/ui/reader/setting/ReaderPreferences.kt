@@ -99,6 +99,9 @@ class ReaderPreferences(
 
     val dualPageInvertWebtoon: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_invert_webtoon", false)
 
+    val dualPageSplitSkipSpread: Preference<Boolean> =
+        preferenceStore.getBoolean("pref_dual_page_split_skip_spread", true)
+
     val dualPageRotateToFit: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_rotate", false)
 
     val dualPageRotateToFitInvert: Preference<Boolean> = preferenceStore.getBoolean(

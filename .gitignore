@@ -15,3 +15,6 @@ local.properties
 
 # macOS specific files
 .DS_Store
+
+# Local algorithm verification artifacts (not part of the build).
+/test/

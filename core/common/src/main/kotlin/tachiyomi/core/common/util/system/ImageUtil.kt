@@ -159,11 +159,11 @@ object ImageUtil {
             val w = bitmap.width
             val h = bitmap.height
             if (w <= 0 || h <= 0) return true
-            val stripFraction = 0.05
-            val stripWidth = max(1, (w * stripFraction).toInt())
-            val xStart = max(0, (w - stripWidth) / 2)
-            val pixels = IntArray(stripWidth * h)
-            bitmap.getPixels(pixels, 0, stripWidth, xStart, 0, stripWidth, h)
+            val searchFraction = 0.05
+            val bandWidth = max(1, (w * searchFraction).toInt())
+            val xStart = max(0, (w - bandWidth) / 2)
+            val pixels = IntArray(bandWidth * h)
+            bitmap.getPixels(pixels, 0, bandWidth, xStart, 0, bandWidth, h)
             val luminance = IntArray(pixels.size)
             for (i in pixels.indices) {
                 val c = pixels[i]
@@ -173,11 +173,12 @@ object ImageUtil {
                 // BT.601 luma approximation.
                 luminance[i] = (r * 299 + g * 587 + b * 114) / 1000
             }
-            val stats = DoublePageSpreadDetector.analyzeCenterStrip(
+            // We already extracted just the centered search band, so scan all of it.
+            val stats = DoublePageSpreadDetector.findBestGutterColumn(
                 luminance = luminance,
-                width = stripWidth,
+                width = bandWidth,
                 height = h,
-                stripFraction = 1.0,
+                searchFraction = 1.0,
             )
             DoublePageSpreadDetector.isStitchedDoublePage(stats)
         } finally {

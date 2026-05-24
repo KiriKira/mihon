@@ -10,77 +10,88 @@ import kotlin.math.sqrt
  * comfortable reading) versus an intentional double-page spread (大跨页, where the
  * artwork crosses the gutter and must not be split).
  *
- * The check is intentionally cheap: it samples a thin vertical strip centered on
- * the image and looks at the luminance distribution. A near-uniform strip whose
- * mean luminance is close to pure white or pure black is treated as a gutter
- * between two stitched pages. Anything else is assumed to be artwork crossing
- * the center, i.e. a real spread.
+ * The check is intentionally cheap: it scans a narrow band of columns centered
+ * on the image and picks the single most-uniform column as the gutter
+ * candidate. If that column has near-zero luminance variance and its mean is
+ * close to pure white or pure black, the page is treated as a stitched scan
+ * and should be split. Anything else (no uniform column near the center, or a
+ * uniform column at mid grey) is assumed to be artwork crossing the center,
+ * i.e. a real spread.
  *
- * The same heuristic is widely used by manga tooling such as Kindle Comic
- * Converter and various Tachiyomi forks; the threshold values below were tuned
- * to match the values reported in those projects.
+ * Using the single best column instead of averaging across a wide strip is
+ * important: real-world manga gutters are often just a handful of pixels wide
+ * (after downsampling, sometimes a single column) and averaging mixes that
+ * pure-white seam with noisy artwork columns next to it, masking the signal.
  */
 internal object DoublePageSpreadDetector {
 
-    data class CenterStripStats(val mean: Double, val stddev: Double)
+    data class ColumnStats(val mean: Double, val stddev: Double, val x: Int)
 
     /**
-     * Analyse a centered vertical strip of an image.
+     * Search a centered band of columns of [luminance] and return the column
+     * (within the band) whose luminance has the lowest standard deviation. That
+     * column is the strongest gutter candidate.
      *
      * @param luminance row-major array of luminance values in `[0, 255]`. Must
      *                  have at least `width * height` entries.
      * @param width image width in [luminance].
      * @param height image height in [luminance].
-     * @param stripFraction fraction of the image width to consider, centered.
-     *                      Must be in `(0, 1]`. Defaults to 5%.
+     * @param searchFraction fraction of the image width to scan, centered.
+     *                       Must be in `(0, 1]`. Defaults to 5%.
      */
-    fun analyzeCenterStrip(
+    fun findBestGutterColumn(
         luminance: IntArray,
         width: Int,
         height: Int,
-        stripFraction: Double = 0.05,
-    ): CenterStripStats {
+        searchFraction: Double = 0.05,
+    ): ColumnStats {
         require(width > 0) { "width must be positive" }
         require(height > 0) { "height must be positive" }
         require(luminance.size >= width * height) { "luminance buffer too small" }
-        require(stripFraction > 0.0 && stripFraction <= 1.0) { "stripFraction out of range" }
+        require(searchFraction > 0.0 && searchFraction <= 1.0) { "searchFraction out of range" }
 
-        val stripWidth = max(1, (width * stripFraction).toInt())
-        val xStart = max(0, (width - stripWidth) / 2)
-        val xEnd = min(width, xStart + stripWidth)
+        val bandWidth = max(1, (width * searchFraction).toInt())
+        val xStart = max(0, (width - bandWidth) / 2)
+        val xEnd = min(width, xStart + bandWidth)
 
-        var n = 0L
-        var sum = 0.0
-        var sumSq = 0.0
-        for (y in 0 until height) {
-            val rowOffset = y * width
-            for (x in xStart until xEnd) {
-                val v = luminance[rowOffset + x]
+        var bestX = xStart
+        var bestMean = 128.0
+        var bestStddev = Double.MAX_VALUE
+        for (x in xStart until xEnd) {
+            var sum = 0.0
+            var sumSq = 0.0
+            for (y in 0 until height) {
+                val v = luminance[y * width + x]
                 sum += v
                 sumSq += v.toDouble() * v
-                n++
+            }
+            val mean = sum / height
+            val variance = (sumSq / height) - mean * mean
+            val stddev = sqrt(max(0.0, variance))
+            if (stddev < bestStddev) {
+                bestStddev = stddev
+                bestMean = mean
+                bestX = x
             }
         }
-        val mean = sum / n
-        val variance = (sumSq / n) - mean * mean
-        return CenterStripStats(mean = mean, stddev = sqrt(max(0.0, variance)))
+        return ColumnStats(mean = bestMean, stddev = bestStddev, x = bestX)
     }
 
     /**
      * Decide whether a wide image is a stitched double-page scan (and therefore
      * should be split) rather than an intentional spread.
      *
-     * Returns `true` when the center strip looks like a near-uniform white or
-     * black gutter; in that case the caller should split the image. Returns
-     * `false` when the center contains artwork (real spread).
+     * Returns `true` when the strongest center column is near-uniform AND its
+     * mean luminance is close to pure white or pure black; in that case the
+     * caller should split the image. Returns `false` otherwise.
      *
      * @param stddevThreshold maximum allowed standard deviation of luminance in
-     *                        the center strip for it to count as "uniform".
+     *                        the candidate column for it to count as "uniform".
      * @param edgeMargin how close to pure white (`255`) or pure black (`0`) the
      *                   mean luminance must be.
      */
     fun isStitchedDoublePage(
-        stats: CenterStripStats,
+        stats: ColumnStats,
         stddevThreshold: Double = 12.0,
         edgeMargin: Int = 25,
     ): Boolean {

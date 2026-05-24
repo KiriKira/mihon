@@ -12,7 +12,7 @@ class DoublePageSpreadDetectorTest {
         val width = 100
         val height = 50
         val luminance = IntArray(width * height) { 255 }
-        val stats = DoublePageSpreadDetector.analyzeCenterStrip(luminance, width, height)
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertEquals(255.0, stats.mean, 0.001)
         assertEquals(0.0, stats.stddev, 0.001)
         assertTrue(DoublePageSpreadDetector.isStitchedDoublePage(stats))
@@ -23,44 +23,77 @@ class DoublePageSpreadDetectorTest {
         val width = 100
         val height = 50
         val luminance = IntArray(width * height) { 0 }
-        val stats = DoublePageSpreadDetector.analyzeCenterStrip(luminance, width, height)
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertEquals(0.0, stats.mean, 0.001)
         assertEquals(0.0, stats.stddev, 0.001)
         assertTrue(DoublePageSpreadDetector.isStitchedDoublePage(stats))
     }
 
     @Test
-    fun `noisy center strip is treated as real spread`() {
+    fun `noisy center is treated as real spread`() {
         val width = 100
         val height = 50
-        // Alternate between dark and light pixels to simulate artwork crossing the center.
         val luminance = IntArray(width * height) { idx -> if (idx % 2 == 0) 20 else 220 }
-        val stats = DoublePageSpreadDetector.analyzeCenterStrip(luminance, width, height)
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertFalse(DoublePageSpreadDetector.isStitchedDoublePage(stats))
     }
 
     @Test
-    fun `mid-grey uniform strip is treated as real spread`() {
-        // Uniform but not near pure white/black -> not a gutter.
+    fun `mid-grey uniform column is treated as real spread`() {
         val width = 100
         val height = 50
         val luminance = IntArray(width * height) { 128 }
-        val stats = DoublePageSpreadDetector.analyzeCenterStrip(luminance, width, height)
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertFalse(DoublePageSpreadDetector.isStitchedDoublePage(stats))
     }
 
     @Test
-    fun `white background with stray ink in center is treated as real spread`() {
+    fun `single white gutter column surrounded by noise is detected as stitched`() {
+        // Mirrors the real failure mode from the test images: artwork is noisy
+        // across the center, but the actual gutter is a thin white column. A
+        // center-strip *average* would hide this; the column-wise scan must
+        // still pick it up.
+        val width = 100
+        val height = 50
+        val luminance = IntArray(width * height) { idx ->
+            val x = idx % width
+            when {
+                x == width / 2 -> 255
+                x % 2 == 0 -> 30
+                else -> 200
+            }
+        }
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
+        assertEquals(255.0, stats.mean, 0.001)
+        assertEquals(0.0, stats.stddev, 0.001)
+        assertTrue(DoublePageSpreadDetector.isStitchedDoublePage(stats))
+    }
+
+    @Test
+    fun `slightly off-center gutter is still detected within the search band`() {
+        val width = 200
+        val height = 40
+        val gutterX = width / 2 - 4
+        val luminance = IntArray(width * height) { idx ->
+            val x = idx % width
+            if (x == gutterX) 255 else (idx * 37) % 200
+        }
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
+        assertEquals(gutterX, stats.x)
+        assertTrue(DoublePageSpreadDetector.isStitchedDoublePage(stats))
+    }
+
+    @Test
+    fun `white background with ink crossing every center column is treated as real spread`() {
         val width = 100
         val height = 50
         val luminance = IntArray(width * height) { 255 }
-        // Inject dark ink across the center strip on a few rows.
         for (y in 10 until 40) {
             for (x in 45 until 55) {
                 luminance[y * width + x] = 20
             }
         }
-        val stats = DoublePageSpreadDetector.analyzeCenterStrip(luminance, width, height)
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertFalse(DoublePageSpreadDetector.isStitchedDoublePage(stats))
     }
 }

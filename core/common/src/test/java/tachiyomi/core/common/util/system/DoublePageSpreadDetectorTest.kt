@@ -33,7 +33,11 @@ class DoublePageSpreadDetectorTest {
     fun `noisy center is treated as real spread`() {
         val width = 100
         val height = 50
-        val luminance = IntArray(width * height) { idx -> if (idx % 2 == 0) 20 else 220 }
+        val luminance = IntArray(width * height) { idx ->
+            val x = idx % width
+            val y = idx / width
+            if ((x + y) % 2 == 0) 20 else 220
+        }
         val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertFalse(DoublePageSpreadDetector.isStitchedDoublePage(stats))
     }
@@ -57,9 +61,12 @@ class DoublePageSpreadDetectorTest {
         val height = 50
         val luminance = IntArray(width * height) { idx ->
             val x = idx % width
+            val y = idx / width
             when {
                 x == width / 2 -> 255
-                x % 2 == 0 -> 30
+                // Noise must vary along y, otherwise non-gutter columns would
+                // also have stddev=0 and could win the min-stddev search.
+                (x + y) % 2 == 0 -> 30
                 else -> 200
             }
         }
@@ -76,7 +83,10 @@ class DoublePageSpreadDetectorTest {
         val gutterX = width / 2 - 4
         val luminance = IntArray(width * height) { idx ->
             val x = idx % width
-            if (x == gutterX) 255 else (idx * 37) % 200
+            val y = idx / width
+            // Noise must vary along y or non-gutter columns become constants
+            // with stddev=0 and the search picks them instead of the gutter.
+            if (x == gutterX) 255 else (x * 37 + y * 53) % 200
         }
         val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
         assertEquals(gutterX, stats.x)

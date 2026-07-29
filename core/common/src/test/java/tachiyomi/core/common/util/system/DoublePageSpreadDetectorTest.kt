@@ -94,6 +94,36 @@ class DoublePageSpreadDetectorTest {
     }
 
     @Test
+    fun `centered gutter is safe for fixed half split`() {
+        val width = 200
+        val height = 40
+        val gutterX = width / 2
+        val luminance = IntArray(width * height) { idx ->
+            val x = idx % width
+            val y = idx / width
+            if (x == gutterX) 255 else (x * 37 + y * 53) % 200
+        }
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
+        assertEquals(gutterX, stats.x)
+        assertTrue(DoublePageSpreadDetector.isStitchedDoublePage(stats, imageWidth = width))
+    }
+
+    @Test
+    fun `visibly off-center gutter is not safe for fixed half split`() {
+        val width = 200
+        val height = 40
+        val gutterX = width / 2 + 4
+        val luminance = IntArray(width * height) { idx ->
+            val x = idx % width
+            val y = idx / width
+            if (x == gutterX) 255 else (x * 37 + y * 53) % 200
+        }
+        val stats = DoublePageSpreadDetector.findBestGutterColumn(luminance, width, height)
+        assertEquals(gutterX, stats.x)
+        assertFalse(DoublePageSpreadDetector.isStitchedDoublePage(stats, imageWidth = width))
+    }
+
+    @Test
     fun `white background with ink crossing every center column is treated as real spread`() {
         val width = 100
         val height = 50

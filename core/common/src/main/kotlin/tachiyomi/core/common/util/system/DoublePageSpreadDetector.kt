@@ -1,5 +1,6 @@
 package tachiyomi.core.common.util.system
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -54,6 +55,7 @@ internal object DoublePageSpreadDetector {
         val xStart = max(0, (width - bandWidth) / 2)
         val xEnd = min(width, xStart + bandWidth)
 
+        val centerX = width / 2.0
         var bestX = xStart
         var bestMean = 128.0
         var bestStddev = Double.MAX_VALUE
@@ -68,7 +70,8 @@ internal object DoublePageSpreadDetector {
             val mean = sum / height
             val variance = (sumSq / height) - mean * mean
             val stddev = sqrt(max(0.0, variance))
-            if (stddev < bestStddev) {
+            val isCloserToCenter = abs(x - centerX) < abs(bestX - centerX)
+            if (stddev < bestStddev || (stddev == bestStddev && isCloserToCenter)) {
                 bestStddev = stddev
                 bestMean = mean
                 bestX = x
@@ -89,12 +92,24 @@ internal object DoublePageSpreadDetector {
      *                        the candidate column for it to count as "uniform".
      * @param edgeMargin how close to pure white (`255`) or pure black (`0`) the
      *                   mean luminance must be.
+     * @param imageWidth full analysed image width. When supplied, the gutter
+     *                   candidate must be close enough to the exact center for
+     *                   a fixed half split to preserve both pages.
+     * @param centerToleranceFraction maximum normalized distance between the
+     *                                gutter candidate and image center.
      */
     fun isStitchedDoublePage(
         stats: ColumnStats,
         stddevThreshold: Double = 12.0,
         edgeMargin: Int = 25,
+        imageWidth: Int? = null,
+        centerToleranceFraction: Double = 0.015,
     ): Boolean {
+        if (imageWidth != null) {
+            require(imageWidth > 0) { "imageWidth must be positive" }
+            val centerOffset = abs(stats.x - imageWidth / 2.0) / imageWidth
+            if (centerOffset > centerToleranceFraction) return false
+        }
         if (stats.stddev > stddevThreshold) return false
         return stats.mean <= edgeMargin || stats.mean >= 255 - edgeMargin
     }

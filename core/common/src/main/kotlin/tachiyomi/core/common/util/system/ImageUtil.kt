@@ -180,7 +180,10 @@ object ImageUtil {
                 height = h,
                 searchFraction = 1.0,
             )
-            DoublePageSpreadDetector.isStitchedDoublePage(stats)
+            DoublePageSpreadDetector.isStitchedDoublePage(
+                stats = stats.copy(x = xStart + stats.x),
+                imageWidth = w,
+            )
         } finally {
             bitmap.recycle()
         }

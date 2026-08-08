@@ -1,0 +1,153 @@
+name: Sync upstream Mihon
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch to merge
+        required: true
+        default: main
+        type: string
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  UPSTREAM_REPOSITORY: https://github.com/mihonapp/mihon.git
+
+jobs:
+  sync:
+    name: Prepare upstream merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      base_sha: ${{ steps.merge.outputs.base_sha }}
+      sync_sha: ${{ steps.merge.outputs.sync_sha }}
+      sync_branch: ${{ steps.merge.outputs.sync_branch }}
+
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        id: merge
+        env:
+          INPUT_UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$INPUT_UPSTREAM_REF" =~ ^[A-Za-z0-9._/-]+$ || "$INPUT_UPSTREAM_REF" == *..* ]]; then
+            echo "Invalid upstream ref: $INPUT_UPSTREAM_REF" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git remote add upstream "$UPSTREAM_REPOSITORY"
+          git fetch --no-tags upstream "refs/heads/${INPUT_UPSTREAM_REF}:refs/remotes/upstream/${INPUT_UPSTREAM_REF}"
+
+          base_sha="$(git rev-parse origin/main)"
+          upstream_sha="$(git rev-parse "refs/remotes/upstream/${INPUT_UPSTREAM_REF}")"
+          if git merge-base --is-ancestor "$upstream_sha" "$base_sha"; then
+            echo "Fork main is already at upstream ${INPUT_UPSTREAM_REF} (${upstream_sha})."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sync_branch="automation/upstream-sync-${GITHUB_RUN_ID}"
+          git checkout -B "$sync_branch" "$base_sha"
+          if ! git merge --no-edit --no-ff "refs/remotes/upstream/${INPUT_UPSTREAM_REF}"; then
+            git merge --abort || true
+            echo "::error::Upstream merge has conflicts. No branch or main ref was changed. Resolve the conflict locally and rerun the sync."
+            exit 1
+          fi
+
+          sync_sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${sync_branch}"
+          {
+            echo "changed=true"
+            echo "base_sha=$base_sha"
+            echo "sync_sha=$sync_sha"
+            echo "sync_branch=$sync_branch"
+          } >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate merged source
+    if: needs.sync.outputs.changed == 'true'
+    needs: sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout merge candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.sync.outputs.sync_sha }}
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version-file: .github/.java-version
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Check format and tests
+        run: |
+          ./gradlew spotlessCheck testDebugUnitTest verifySqlDelightMigration assembleRelease -Pinclude-telemetry -Penable-updater
+
+  promote:
+    name: Promote validated merge
+    if: needs.sync.outputs.changed == 'true'
+    needs: [sync, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fast-forward main and dispatch signed build
+        env:
+          BASE_SHA: ${{ needs.sync.outputs.base_sha }}
+          SYNC_SHA: ${{ needs.sync.outputs.sync_sha }}
+          SYNC_BRANCH: ${{ needs.sync.outputs.sync_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin main "refs/heads/${SYNC_BRANCH}:refs/remotes/origin/${SYNC_BRANCH}"
+          current_main="$(git rev-parse origin/main)"
+          if [[ "$current_main" != "$BASE_SHA" ]]; then
+            echo "Fork main changed while the merge was being validated; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          git push origin "${SYNC_SHA}:refs/heads/main"
+          gh workflow run fork-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f source_ref="$SYNC_SHA" \
+            -f release_mode=auto
+
+          git push origin --delete "$SYNC_BRANCH"

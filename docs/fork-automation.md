@@ -18,9 +18,12 @@ changes.
 ## Actions and signing setup
 
 The repository must allow GitHub Actions to write repository contents and
-releases. The sync workflow uses the built-in `GITHUB_TOKEN`; branch protection
-rules must allow that bot to update `main`, or synchronization will stop before
-the build job.
+releases. Configure an `UPSTREAM_SYNC_TOKEN` Actions secret containing a
+fine-scoped PAT with repository Contents and Workflows read/write permission.
+The sync checkout uses this workflow-capable token because GitHub blocks a
+regular `GITHUB_TOKEN` from pushing workflow-file changes. Branch protection
+rules must also allow that bot to update `main`, or synchronization will stop
+before the build job.
 
 For a private production key, configure all four preferred repository secrets:
 

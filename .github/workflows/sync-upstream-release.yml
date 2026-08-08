@@ -26,7 +26,16 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ github.token }}
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Require workflow-capable sync token
+        env:
+          SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+        run: |
+          if [[ -z "$SYNC_TOKEN" ]]; then
+            echo "Missing UPSTREAM_SYNC_TOKEN. Add a repository Actions secret containing a PAT with Contents: read/write and Workflows: read/write."
+            exit 1
+          fi
 
       - name: Read latest upstream release
         id: upstream
@@ -57,11 +66,6 @@ jobs:
             exit 0
           fi
           git merge --no-ff "refs/tags/upstream/$TAG" -m "sync: upstream release $TAG"
-          # Keep this fork's workflows. Besides preserving the fork release pipeline,
-          # this avoids GitHub's deliberate restriction on GITHUB_TOKEN pushes that
-          # modify workflow files. Upstream application and build changes are kept.
-          git restore --source=HEAD^ --staged --worktree .github/workflows
-          git commit --amend --no-edit
           sha="$(git rev-parse HEAD)"
           git tag -a "$TAG" -m "Fork build of upstream $TAG" "$sha"
           git push origin HEAD:main "refs/tags/$TAG"

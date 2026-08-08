@@ -40,6 +40,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+        with:
+          cache-disabled: true
 
       - name: Check code format
         run: ./gradlew spotlessCheck
@@ -57,18 +59,14 @@ jobs:
         with:
           name: test-report-${{ github.sha }}
           path: app/build/reports/tests/testDebugUnitTest
+          retention-days: 3
 
       - name: Build app
         run: ./gradlew assembleRelease -Pinclude-telemetry -Penable-updater
-
-      - name: Upload APK
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: arm64-v8a-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
 
       - name: Upload mapping
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: mapping-${{ github.sha }}
           path: app/build/outputs/mapping/release
+          retention-days: 7

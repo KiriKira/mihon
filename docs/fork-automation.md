@@ -38,6 +38,11 @@ for compatibility. The workflow rejects partial secret sets and checks the
 certificate against `.github/signing-cert.sha256` before signing and again
 after signing each APK.
 
+If using a different private keystore, update `.github/signing-cert.sha256` to
+that keystore's SHA-256 certificate fingerprint in the same reviewed change.
+Do not change the keystore later unless you intentionally accept that existing
+installations will need to be uninstalled first.
+
 If no secrets are configured, the committed `.github/keystore/ci.p12` is used.
 It is a fixed CI distribution key, not a confidential production key. Its
 certificate is intentionally checked into the repository so every build uses

@@ -36,6 +36,9 @@ abstract class ViewerConfig(readerPreferences: ReaderPreferences, private val sc
     var dualPageInvert = false
         protected set
 
+    var dualPageSkipSpread = true
+        protected set
+
     var dualPageRotateToFit = false
         protected set
 

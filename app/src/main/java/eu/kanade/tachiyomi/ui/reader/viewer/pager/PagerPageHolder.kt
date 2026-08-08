@@ -203,6 +203,12 @@ class PagerPageHolder(
             return imageSource
         }
 
+        // Smart skip: do not split if the wide page is a real double-page spread
+        // (artwork crosses the gutter) instead of two stitched single pages.
+        if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
+            return imageSource
+        }
+
         onPageSplit(page)
 
         return splitInHalf(imageSource)

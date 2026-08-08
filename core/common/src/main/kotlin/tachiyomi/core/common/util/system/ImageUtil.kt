@@ -124,6 +124,68 @@ object ImageUtil {
     }
 
     /**
+     * Check whether a wide image is a stitched two-page scan (and therefore safe
+     * to split in half) or an intentional double-page spread (大跨页) that crosses
+     * the gutter and must be kept whole.
+     *
+     * The image is decoded at a low sample rate to keep this check cheap, then a
+     * thin vertical strip centered on the image is analysed by
+     * [DoublePageSpreadDetector]. A near-uniform strip whose mean luminance is
+     * close to pure white or pure black is treated as a gutter between two
+     * stitched pages. Anything else is assumed to be artwork crossing the center.
+     *
+     * Falls back to `true` (i.e. preserves the legacy "always split wide pages"
+     * behaviour) when the image cannot be decoded.
+     */
+    fun isWideStitchedPage(imageSource: BufferedSource): Boolean {
+        val options = extractImageOptions(imageSource)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return true
+        if (options.outWidth <= options.outHeight) return false
+
+        val targetWidth = 512
+        val sampleSize = max(1, options.outWidth / targetWidth)
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = try {
+            BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, decodeOptions)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN) { "Failed to decode image for spread detection: ${e.message}" }
+            null
+        } ?: return true
+
+        return try {
+            val w = bitmap.width
+            val h = bitmap.height
+            if (w <= 0 || h <= 0) return true
+            val stripFraction = 0.05
+            val stripWidth = max(1, (w * stripFraction).toInt())
+            val xStart = max(0, (w - stripWidth) / 2)
+            val pixels = IntArray(stripWidth * h)
+            bitmap.getPixels(pixels, 0, stripWidth, xStart, 0, stripWidth, h)
+            val luminance = IntArray(pixels.size)
+            for (i in pixels.indices) {
+                val c = pixels[i]
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
+                // BT.601 luma approximation.
+                luminance[i] = (r * 299 + g * 587 + b * 114) / 1000
+            }
+            val stats = DoublePageSpreadDetector.analyzeCenterStrip(
+                luminance = luminance,
+                width = stripWidth,
+                height = h,
+                stripFraction = 1.0,
+            )
+            DoublePageSpreadDetector.isStitchedDoublePage(stats)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /**
      * Extract the 'side' part from [BufferedSource] and return it as [BufferedSource].
      */
     fun splitInHalf(imageSource: BufferedSource, side: Side): BufferedSource {

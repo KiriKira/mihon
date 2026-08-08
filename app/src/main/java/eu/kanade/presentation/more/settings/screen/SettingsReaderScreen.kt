@@ -264,6 +264,12 @@ object SettingsReaderScreen : SearchableSettings {
                     enabled = dualPageSplit,
                 ),
                 Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.dualPageSplitSkipSpread,
+                    title = stringResource(MR.strings.pref_dual_page_skip_spread),
+                    subtitle = stringResource(MR.strings.pref_dual_page_skip_spread_summary),
+                    enabled = dualPageSplit,
+                ),
+                Preference.PreferenceItem.SwitchPreference(
                     preference = rotateToFitPref,
                     title = stringResource(MR.strings.pref_page_rotate),
                     onValueChanged = {
@@ -351,6 +357,12 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.dualPageInvertWebtoon,
                     title = stringResource(MR.strings.pref_dual_page_invert),
                     subtitle = stringResource(MR.strings.pref_dual_page_invert_summary),
+                    enabled = dualPageSplit,
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.dualPageSplitSkipSpread,
+                    title = stringResource(MR.strings.pref_dual_page_skip_spread),
+                    subtitle = stringResource(MR.strings.pref_dual_page_skip_spread_summary),
                     enabled = dualPageSplit,
                 ),
                 Preference.PreferenceItem.SwitchPreference(

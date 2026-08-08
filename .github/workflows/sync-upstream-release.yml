@@ -1,4 +1,4 @@
-name: Sync upstream release
+name: Sync upstream and publish fork build
 
 on:
   schedule:
@@ -17,9 +17,13 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       synced: ${{ steps.sync.outputs.synced }}
-      tag: ${{ steps.upstream.outputs.tag }}
       sha: ${{ steps.sync.outputs.sha }}
-      release_url: ${{ steps.upstream.outputs.release_url }}
+      release_tag: ${{ steps.sync.outputs.release_tag }}
+      release_name: ${{ steps.sync.outputs.release_name }}
+      version_code: ${{ steps.sync.outputs.version_code }}
+      version_name: ${{ steps.sync.outputs.version_name }}
+      core_changed: ${{ steps.sync.outputs.core_changed }}
+      upstream_release_url: ${{ steps.sync.outputs.upstream_release_url }}
     steps:
       - name: Check out fork main
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -28,54 +32,77 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Read latest upstream release
-        id: upstream
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          release="$(gh api repos/mihonapp/mihon/releases/latest)"
-          tag="$(jq -r .tag_name <<<"$release")"
-          url="$(jq -r .html_url <<<"$release")"
-          [[ "$tag" =~ ^v[0-9]+(\.[0-9]+){1,3}([._-][0-9A-Za-z.-]+)?$ ]] || { echo "Unexpected upstream tag: $tag"; exit 1; }
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "release_url=$url" >> "$GITHUB_OUTPUT"
-
-      - name: Merge the upstream release tag
+      - name: Fetch upstream main
         id: sync
         env:
-          TAG: ${{ steps.upstream.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/mihonapp/mihon.git
-          git fetch --no-tags upstream "refs/tags/$TAG:refs/tags/upstream/$TAG"
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Release $TAG was already synchronized."
+          git fetch --no-tags upstream refs/heads/main:refs/remotes/upstream/main
+
+          base_sha="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
+          current_version="$(git show "$base_sha:app/build.gradle.kts" | sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' | head -n1)"
+          upstream_version="$(git show "$upstream_sha:app/build.gradle.kts" | sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' | head -n1)"
+          upstream_code="$(git show "$upstream_sha:app/build.gradle.kts" | sed -nE 's/^[[:space:]]*versionCode = ([0-9]+).*/\1/p' | head -n1)"
+          [[ "$upstream_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid upstream versionName: $upstream_version"; exit 1; }
+          [[ "$upstream_code" =~ ^[0-9]+$ ]] || { echo "Invalid upstream versionCode: $upstream_code"; exit 1; }
+
+          if git merge-base --is-ancestor "$upstream_sha" "$base_sha"; then
+            echo "Upstream main is already contained in fork main."
             echo "synced=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git merge --no-ff "refs/tags/upstream/$TAG" -m "sync: upstream release $TAG"
-          # Keep this fork's workflows. Besides preserving the fork release pipeline,
-          # this avoids GitHub's deliberate restriction on GITHUB_TOKEN pushes that
-          # modify workflow files. Upstream application and build changes are kept.
-          git restore --source=HEAD^ --staged --worktree .github/workflows
+
+          # A merge conflict stops the workflow before anything is pushed. Resolve it
+          # in a branch, then rerun this workflow after updating the fork workflows.
+          git merge --no-ff --no-edit "$upstream_sha" -m "sync: upstream main $(git rev-parse --short "$upstream_sha")"
+
+          # The fork owns its automation. Restoring this directory also avoids the
+          # GITHUB_TOKEN workflow-file restriction when pushing the merge commit.
+          git restore --source="$base_sha" --staged --worktree .github/workflows
           git commit --amend --no-edit
+
+          commit_count="$(git rev-list --count HEAD)"
+          version_name="${upstream_version}-kiri.${commit_count}"
+          version_code="$((upstream_code * 100000 + commit_count))"
+          release_tag="v${version_name}"
+          release_name="Mihon ${version_name} (KiriKira fork)"
+          core_changed=false
+          [[ "$current_version" != "$upstream_version" ]] && core_changed=true
+
+          upstream_release_url=""
+          if release_json="$(gh api repos/mihonapp/mihon/releases/latest 2>/dev/null)"; then
+            upstream_release_url="$(jq -r .html_url <<<"$release_json")"
+          fi
+
           sha="$(git rev-parse HEAD)"
-          git tag -a "$TAG" -m "Fork build of upstream $TAG" "$sha"
-          git push origin HEAD:main "refs/tags/$TAG"
-          echo "synced=true" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main
+
+          {
+            echo "synced=true"
+            echo "sha=$sha"
+            echo "release_tag=$release_tag"
+            echo "release_name=$release_name"
+            echo "version_code=$version_code"
+            echo "version_name=$version_name"
+            echo "core_changed=$core_changed"
+            echo "upstream_release_url=$upstream_release_url"
+          } >> "$GITHUB_OUTPUT"
 
   build-and-release:
     needs: sync
     if: needs.sync.outputs.synced == 'true'
     uses: ./.github/workflows/kiri-release.yml
     with:
-      release_tag: ${{ needs.sync.outputs.tag }}
+      release_tag: ${{ needs.sync.outputs.release_tag }}
       target_sha: ${{ needs.sync.outputs.sha }}
-      release_name: Mihon ${{ needs.sync.outputs.tag }}
-      prerelease: false
-      upstream_release_url: ${{ needs.sync.outputs.release_url }}
+      release_name: ${{ needs.sync.outputs.release_name }}
+      prerelease: ${{ needs.sync.outputs.core_changed != 'true' }}
+      version_code: ${{ needs.sync.outputs.version_code }}
+      version_name: ${{ needs.sync.outputs.version_name }}
+      upstream_release_url: ${{ needs.sync.outputs.upstream_release_url }}
     secrets: inherit

@@ -17,6 +17,14 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val forkVersionCode = System.getenv("MIHON_VERSION_CODE")?.toIntOrNull()
+val forkVersionName = System.getenv("MIHON_VERSION_NAME")
+val releaseRepository = System.getenv("MIHON_RELEASE_REPO") ?: "mihonapp/mihon"
+val releaseTag = System.getenv("MIHON_RELEASE_TAG").orEmpty()
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 if (Config.includeTelemetry) {
     pluginManager.apply {
         apply(libs.plugins.google.services.get().pluginId)
@@ -35,11 +43,16 @@ android {
         versionCode = 29
         versionName = "0.20.4"
 
+        forkVersionCode?.let { versionCode = it }
+        forkVersionName?.let { versionName = it }
+
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = false)}\"")
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
+        buildConfigField("String", "RELEASE_REPO", buildConfigString(releaseRepository))
+        buildConfigField("String", "RELEASE_TAG", buildConfigString(releaseTag))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -332,6 +345,11 @@ dependencies {
 
 androidComponents {
     onVariants { variant ->
+        variant.outputs.forEach { output ->
+            forkVersionCode?.let { output.versionCode.set(it) }
+            forkVersionName?.let { output.versionName.set(it) }
+        }
+
         val resSource = variant.sources.res ?: return@onVariants
 
         val variantName = variant.name.replaceFirstChar { it.uppercase() }

@@ -1,0 +1,51 @@
+name: Publish fork CI build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-ci-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+      version_name: ${{ steps.meta.outputs.version_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - id: meta
+        run: |
+          set -euo pipefail
+          upstream_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)"
+          if [[ -z "$upstream_tag" ]]; then
+            upstream_tag="v$(awk -F'"' '/versionName = / { print $2; exit }' app/build.gradle.kts)"
+          fi
+          version_code="1$(date -u +%y%j%H%M)"
+          tag="ci-${upstream_tag}-${GITHUB_RUN_NUMBER}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=Mihon fork CI $upstream_tag (#$GITHUB_RUN_NUMBER)" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "version_name=${upstream_tag#v}" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    needs: metadata
+    uses: ./.github/workflows/kiri-release.yml
+    with:
+      release_tag: ${{ needs.metadata.outputs.tag }}
+      target_sha: ${{ github.sha }}
+      release_name: ${{ needs.metadata.outputs.name }}
+      prerelease: true
+      version_code: ${{ needs.metadata.outputs.version_code }}
+      version_name: ${{ needs.metadata.outputs.version_name }}
+    secrets: inherit

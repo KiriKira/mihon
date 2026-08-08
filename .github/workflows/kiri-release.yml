@@ -1,0 +1,156 @@
+name: Build and publish fork release
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Git tag to create or update
+        required: true
+        type: string
+      target_sha:
+        description: Commit to build and attach to the release
+        required: true
+        type: string
+      release_name:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: boolean
+      version_code:
+        description: Optional Android versionCode override for fork CI builds
+        required: false
+        type: string
+      version_name:
+        description: Optional Android versionName override for fork CI builds
+        required: false
+        type: string
+      upstream_release_url:
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag
+        required: true
+        type: string
+      version_code:
+        description: Optional monotonically increasing Android versionCode
+        required: false
+        type: string
+      version_name:
+        description: Optional Android versionName
+        required: false
+        type: string
+
+concurrency:
+  group: kiri-release-${{ inputs.release_tag || github.event.inputs.release_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.event.inputs.release_tag }}
+      TARGET_SHA: ${{ inputs.target_sha || github.sha }}
+      RELEASE_NAME: ${{ inputs.release_name || format('Mihon fork CI {0}', github.event.inputs.release_tag) }}
+      PRERELEASE: ${{ inputs.prerelease || false }}
+      VERSION_CODE: ${{ inputs.version_code || github.event.inputs.version_code }}
+      VERSION_NAME: ${{ inputs.version_name || github.event.inputs.version_name }}
+      UPSTREAM_RELEASE_URL: ${{ inputs.upstream_release_url }}
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_SHA }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version-file: .github/.java-version
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+
+      - name: Build release APKs
+        run: |
+          set -euo pipefail
+          args=(assembleRelease -Pinclude-telemetry -Penable-updater)
+          if [[ -n "$VERSION_CODE" ]]; then
+            args+=("-Pandroid.injected.version.code=$VERSION_CODE")
+          fi
+          if [[ -n "$VERSION_NAME" ]]; then
+            args+=("-Pandroid.injected.version.name=$VERSION_NAME")
+          fi
+          ./gradlew "${args[@]}"
+
+      - name: Prepare persistent signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > signing.p12
+            echo "KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            cp .github/keystore/ci.p12 signing.p12
+            echo "KEY_ALIAS=mihon-ci" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sign, verify, and checksum APKs
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS_DIR="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          mkdir -p release-assets
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*-unsigned.apk)
+          ((${#apks[@]})) || { echo "No release APKs were produced"; exit 1; }
+          for apk in "${apks[@]}"; do
+            stem="$(basename "$apk" -unsigned.apk)"
+            output="release-assets/mihon-${RELEASE_TAG}-${stem}.apk"
+            "$BUILD_TOOLS_DIR/zipalign" -p -f 4 "$apk" "${output}.aligned"
+            "$BUILD_TOOLS_DIR/apksigner" sign --ks signing.p12 --ks-type PKCS12 --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "$output" "${output}.aligned"
+            "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$output"
+            rm "${output}.aligned"
+          done
+          (cd release-assets && sha256sum *.apk > checksums.txt)
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=release-notes.md
+          {
+            echo "Automated build from commit \`$TARGET_SHA\`."
+            if [[ -n "$UPSTREAM_RELEASE_URL" ]]; then
+              echo
+              echo "Upstream release: $UPSTREAM_RELEASE_URL"
+            fi
+            if [[ -n "$VERSION_CODE" ]]; then
+              echo
+              echo "Android versionCode: \`$VERSION_CODE\` (fork CI override)."
+            fi
+            echo
+            echo "All APKs are signed with the persistent fork signing key, so later fork builds with a higher versionCode can install as upgrades."
+          } > "$notes"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME" --notes-file "$notes" $([[ "$PRERELEASE" == "true" ]] && echo --prerelease || echo --latest)
+          else
+            prerelease_arg=()
+            [[ "$PRERELEASE" == "true" ]] && prerelease_arg=(--prerelease)
+            gh release create "$RELEASE_TAG" release-assets/* --target "$TARGET_SHA" --title "$RELEASE_NAME" --notes-file "$notes" "${prerelease_arg[@]}"
+          fi

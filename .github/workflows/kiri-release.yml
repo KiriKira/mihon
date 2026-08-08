@@ -34,6 +34,10 @@ on:
         description: GitHub release tag
         required: true
         type: string
+      target_ref:
+        description: Optional commit SHA or git tag to build
+        required: false
+        type: string
       version_code:
         description: Optional monotonically increasing Android versionCode
         required: false
@@ -56,7 +60,7 @@ jobs:
     timeout-minutes: 60
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.event.inputs.release_tag }}
-      TARGET_SHA: ${{ inputs.target_sha || github.sha }}
+      TARGET_SHA: ${{ inputs.target_sha || github.event.inputs.target_ref || github.sha }}
       RELEASE_NAME: ${{ inputs.release_name || format('Mihon fork CI {0}', github.event.inputs.release_tag) }}
       PRERELEASE: ${{ inputs.prerelease || false }}
       VERSION_CODE: ${{ inputs.version_code || github.event.inputs.version_code }}
@@ -115,8 +119,8 @@ jobs:
           BUILD_TOOLS_DIR="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           mkdir -p release-assets
           shopt -s nullglob
-          apks=(app/build/outputs/apk/release/*.apk)
-          ((${#apks[@]})) || { echo "No release APKs were produced"; exit 1; }
+          apks=(app/build/outputs/apk/release/*arm64-v8a*.apk)
+          ((${#apks[@]} == 1)) || { echo "Expected exactly one arm64-v8a release APK, found ${#apks[@]}"; exit 1; }
           for apk in "${apks[@]}"; do
             stem="$(basename "$apk" .apk)"
             stem="${stem%-unsigned}"

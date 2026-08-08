@@ -122,7 +122,7 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
         )
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_skip_spread),
-            pref = screenModel.preferences.dualPageSplitSkipSpread,
+            pref = viewModel.preferences.dualPageSplitSkipSpread,
         )
     }
 
@@ -181,7 +181,7 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
     if (dualPageSplitWebtoon) {
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_skip_spread),
-            pref = screenModel.preferences.dualPageSplitSkipSpread,
+            pref = viewModel.preferences.dualPageSplitSkipSpread,
         )
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_invert),

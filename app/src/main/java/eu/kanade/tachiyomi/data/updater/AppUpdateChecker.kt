@@ -26,6 +26,7 @@ class AppUpdateChecker {
                     BuildConfig.VERSION_NAME,
                     GITHUB_REPO,
                     forceCheck,
+                    includePrerelease = BuildConfig.RELEASE_TAG.isNotBlank(),
                 ),
             )
 
@@ -38,7 +39,7 @@ val GITHUB_REPO: String by lazy {
     if (isPreviewBuildType) {
         "mihonapp/mihon-preview"
     } else {
-        "mihonapp/mihon"
+        BuildConfig.RELEASE_REPO
     }
 }
 
@@ -46,7 +47,7 @@ val RELEASE_TAG: String by lazy {
     if (isPreviewBuildType) {
         "r${BuildConfig.COMMIT_COUNT}"
     } else {
-        "v${BuildConfig.VERSION_NAME}"
+        BuildConfig.RELEASE_TAG.ifBlank { "v${BuildConfig.VERSION_NAME}" }
     }
 }
 

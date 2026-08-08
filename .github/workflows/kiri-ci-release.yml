@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   metadata:
+    # The sync workflow calls kiri-release directly. A PAT-backed push to main
+    # also emits a push event, so avoid building the same sync merge twice.
+    if: "${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'sync: upstream main ') }}"
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -27,16 +30,17 @@ jobs:
       - id: meta
         run: |
           set -euo pipefail
-          upstream_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)"
-          if [[ -z "$upstream_tag" ]]; then
-            upstream_tag="v$(awk -F'"' '/versionName = / { print $2; exit }' app/build.gradle.kts)"
-          fi
-          version_code="1$(date -u +%y%j%H%M)"
-          tag="ci-${upstream_tag}-${GITHUB_RUN_NUMBER}"
+          base_code="$(sed -nE 's/^[[:space:]]*versionCode = ([0-9]+).*/\1/p' app/build.gradle.kts | head -n1)"
+          base_version="$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' app/build.gradle.kts | head -n1)"
+          [[ "$base_code" =~ ^[0-9]+$ && "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || exit 1
+          commit_count="$(git rev-list --count HEAD)"
+          version_code="$((base_code * 100000 + commit_count))"
+          version_name="${base_version}-kiri.${commit_count}"
+          tag="v${version_name}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=Mihon fork CI $upstream_tag (#$GITHUB_RUN_NUMBER)" >> "$GITHUB_OUTPUT"
+          echo "name=Mihon fork CI $version_name" >> "$GITHUB_OUTPUT"
           echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
-          echo "version_name=${upstream_tag#v}" >> "$GITHUB_OUTPUT"
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
 
   build-and-release:
     needs: metadata

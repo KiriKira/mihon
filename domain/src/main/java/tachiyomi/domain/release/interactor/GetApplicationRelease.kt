@@ -41,14 +41,16 @@ class GetApplicationRelease(
 
             val newSemVer = newVersion.split(".").map { it.toInt() }
             val oldSemVer = oldVersion.split(".").map { it.toInt() }
-
-            oldSemVer.mapIndexed { index, i ->
-                if (newSemVer[index] > i) {
-                    return true
+            val componentCount = maxOf(newSemVer.size, oldSemVer.size)
+            (0 until componentCount).firstNotNullOfOrNull { index ->
+                val newComponent = newSemVer.getOrElse(index) { 0 }
+                val oldComponent = oldSemVer.getOrElse(index) { 0 }
+                when {
+                    newComponent > oldComponent -> true
+                    newComponent < oldComponent -> false
+                    else -> null
                 }
-            }
-
-            false
+            } ?: false
         }
     }
 
@@ -59,6 +61,7 @@ class GetApplicationRelease(
         val versionName: String,
         val repository: String,
         val forceCheck: Boolean = false,
+        val includePrerelease: Boolean = false,
     )
 
     sealed interface Result {

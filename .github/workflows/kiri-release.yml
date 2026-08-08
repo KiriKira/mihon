@@ -115,10 +115,11 @@ jobs:
           BUILD_TOOLS_DIR="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           mkdir -p release-assets
           shopt -s nullglob
-          apks=(app/build/outputs/apk/release/*-unsigned.apk)
+          apks=(app/build/outputs/apk/release/*.apk)
           ((${#apks[@]})) || { echo "No release APKs were produced"; exit 1; }
           for apk in "${apks[@]}"; do
-            stem="$(basename "$apk" -unsigned.apk)"
+            stem="$(basename "$apk" .apk)"
+            stem="${stem%-unsigned}"
             output="release-assets/mihon-${RELEASE_TAG}-${stem}.apk"
             "$BUILD_TOOLS_DIR/zipalign" -p -f 4 "$apk" "${output}.aligned"
             "$BUILD_TOOLS_DIR/apksigner" sign --ks signing.p12 --ks-type PKCS12 --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "$output" "${output}.aligned"

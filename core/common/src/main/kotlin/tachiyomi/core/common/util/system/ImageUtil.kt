@@ -142,11 +142,12 @@ object ImageUtil {
         imageHeight: Int,
         viewportWidth: Int,
         viewportHeight: Int,
-    ): Boolean {
-        if (imageWidth <= 0 || imageHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return false
-        if (imageWidth == imageHeight || viewportWidth == viewportHeight) return false
-        return (imageWidth > imageHeight) != (viewportWidth > viewportHeight)
-    }
+    ): Boolean = PageRotationCalculator.shouldRotateToMatchViewport(
+        imageWidth = imageWidth,
+        imageHeight = imageHeight,
+        viewportWidth = viewportWidth,
+        viewportHeight = viewportHeight,
+    )
 
     /**
      * Check whether a wide image is a stitched two-page scan (and therefore safe

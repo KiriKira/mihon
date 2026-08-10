@@ -1,213 +1,121 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
-import com.google.android.gms.tasks.Task
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.logcat
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
-import kotlin.math.max
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.nio.FloatBuffer
+import java.util.Collections
+import kotlin.math.min
+import kotlin.math.roundToInt
 
-/** Detects the rotation needed to make Chinese glyphs in a page upright. */
+/** Detects the correction needed to make a page upright. */
 internal object PageOrientationDetector {
 
-    private const val PREVIEW_MAX_DIMENSION = 1600
-    private const val MIN_CHINESE_CHARACTERS = 2
-    private const val MIN_WINNING_MARGIN = 1.12
-    private const val MAX_GLYPH_SAMPLES = 32
-    private const val GLYPH_COLUMNS = 8
-    private const val GLYPH_TILE_SIZE = 96
-    private const val GLYPH_TILE_PADDING = 8f
+    private const val MODEL_ASSET = "models/page_orientation.onnx"
+    private const val RESIZE_SHORT_SIDE = 256
+    private const val INPUT_SIZE = 224
+    private const val CHANNEL_SIZE = INPUT_SIZE * INPUT_SIZE
+    private const val MIN_ROTATION_CONFIDENCE = 0.70f
 
-    private val recognizer by lazy {
-        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+    private val environment by lazy { OrtEnvironment.getEnvironment() }
+    private val session by lazy {
+        val model = Injekt.get<Application>().assets.open(MODEL_ASSET).use { it.readBytes() }
+        OrtSession.SessionOptions().use { options ->
+            options.setIntraOpNumThreads(2)
+            options.setInterOpNumThreads(1)
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            environment.createSession(model, options)
+        }
     }
     private val recognitionMutex = Mutex()
 
-    /**
-     * Returns one of 0, 90, 180, or 270 degrees. A zero result also means the
-     * detector did not have enough confident Chinese text to change the page.
-     */
+    /** Returns one of 0, 90, 180, or 270 clockwise correction degrees. */
     suspend fun detectCorrection(imageSource: BufferedSource): Float = recognitionMutex.withLock {
-        val bitmap = decodePreview(imageSource) ?: return@withLock 0f
+        val bitmap = decodeModelInput(imageSource) ?: return@withLock 0f
         try {
-            val unrotatedText = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
-            currentCoroutineContext().ensureActive()
-
-            val glyphBounds = chineseGlyphBounds(bitmap, unrotatedText)
-            if (glyphBounds.size >= MIN_CHINESE_CHARACTERS) {
-                val glyphScores = listOf(0, 90, 180, 270).map { rotation ->
-                    val glyphSheet = createGlyphSheet(bitmap, glyphBounds, rotation)
-                    try {
-                        val glyphText = recognizer.process(InputImage.fromBitmap(glyphSheet, 0)).await()
-                        currentCoroutineContext().ensureActive()
-                        score(rotation, glyphText)
-                    } finally {
-                        glyphSheet.recycle()
-                    }
-                }
-                return@withLock selectCorrection(glyphScores).toFloat()
-            }
-
-            val scores = buildList {
-                add(score(0, unrotatedText))
-                for (rotation in listOf(90, 180, 270)) {
-                    val rotatedText = recognizer.process(InputImage.fromBitmap(bitmap, rotation)).await()
-                    currentCoroutineContext().ensureActive()
-                    add(score(rotation, rotatedText))
-                }
-            }
-            selectCorrection(scores).toFloat()
+            selectCorrection(runModel(bitmap)).toFloat()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logcat(LogPriority.WARN, e) { "Failed to detect page text orientation" }
+            logcat(LogPriority.WARN, e) { "Failed to classify page orientation" }
             0f
         } finally {
             bitmap.recycle()
         }
     }
 
-    private fun decodePreview(imageSource: BufferedSource): Bitmap? {
+    private fun decodeModelInput(imageSource: BufferedSource): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = max(1, max(bounds.outWidth, bounds.outHeight) / PREVIEW_MAX_DIMENSION)
-            inPreferredConfig = Bitmap.Config.ARGB_8888
+        var sampleSize = 1
+        val shortSide = min(bounds.outWidth, bounds.outHeight)
+        while (shortSide / (sampleSize * 2) >= RESIZE_SHORT_SIDE) {
+            sampleSize *= 2
         }
-        return BitmapFactory.decodeStream(imageSource.peek().inputStream(), null, options)
+        val decoded = BitmapFactory.decodeStream(
+            imageSource.peek().inputStream(),
+            null,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        ) ?: return null
+
+        val scale = RESIZE_SHORT_SIDE.toFloat() / min(decoded.width, decoded.height)
+        val scaledWidth = (decoded.width * scale).roundToInt()
+        val scaledHeight = (decoded.height * scale).roundToInt()
+        val scaled = Bitmap.createScaledBitmap(decoded, scaledWidth, scaledHeight, true)
+        if (scaled !== decoded) decoded.recycle()
+
+        val left = (scaled.width - INPUT_SIZE) / 2
+        val top = (scaled.height - INPUT_SIZE) / 2
+        val cropped = Bitmap.createBitmap(scaled, left, top, INPUT_SIZE, INPUT_SIZE)
+        if (cropped !== scaled) scaled.recycle()
+        return cropped
     }
 
-    private fun score(rotation: Int, text: Text): RotationScore {
-        var chineseCharacters = 0
-        var weightedConfidence = 0.0
-        text.textBlocks.forEach { block ->
-            block.lines.forEach { line ->
-                line.elements.forEach { element ->
-                    val count = element.text.codePoints().filter(::isChineseCodePoint).count().toInt()
-                    if (count > 0) {
-                        chineseCharacters += count
-                        val confidence = element.confidence.takeIf { it > 0f } ?: 0.5f
-                        weightedConfidence += count * (0.5 + confidence)
-                    }
-                }
+    private fun runModel(bitmap: Bitmap): FloatArray {
+        val pixels = IntArray(CHANNEL_SIZE)
+        bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+
+        val input = FloatArray(CHANNEL_SIZE * 3)
+        pixels.forEachIndexed { index, pixel ->
+            input[index] = (((pixel shr 16) and 0xFF) / 255f - 0.485f) / 0.229f
+            input[CHANNEL_SIZE + index] = (((pixel shr 8) and 0xFF) / 255f - 0.456f) / 0.224f
+            input[CHANNEL_SIZE * 2 + index] = ((pixel and 0xFF) / 255f - 0.406f) / 0.225f
+        }
+
+        OnnxTensor.createTensor(
+            environment,
+            FloatBuffer.wrap(input),
+            longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong()),
+        ).use { tensor ->
+            session.run(Collections.singletonMap(session.inputNames.first(), tensor)).use { result ->
+                val scores = FloatArray(4)
+                (result[0] as OnnxTensor).floatBuffer.get(scores)
+                return scores
             }
         }
-        return RotationScore(rotation, chineseCharacters, weightedConfidence)
     }
 
-    private fun chineseGlyphBounds(bitmap: Bitmap, text: Text): List<Rect> = buildList {
-        text.textBlocks.forEach { block ->
-            block.lines.forEach { line ->
-                line.elements.forEach { element ->
-                    symbolLoop@ for (symbol in element.symbols) {
-                        if (symbol.text.codePoints().noneMatch(::isChineseCodePoint)) continue@symbolLoop
-                        val bounds = symbol.boundingBox ?: continue@symbolLoop
-                        if (bounds.width() <= 0 || bounds.height() <= 0) continue@symbolLoop
-
-                        val padding = (max(bounds.width(), bounds.height()) * 0.15f).toInt()
-                        add(
-                            Rect(
-                                (bounds.left - padding).coerceAtLeast(0),
-                                (bounds.top - padding).coerceAtLeast(0),
-                                (bounds.right + padding).coerceAtMost(bitmap.width),
-                                (bounds.bottom + padding).coerceAtMost(bitmap.height),
-                            ),
-                        )
-                        if (size == MAX_GLYPH_SAMPLES) return@buildList
-                    }
-                }
-            }
-        }
+    /** Model labels describe current clockwise orientation; the viewer needs its inverse. */
+    internal fun selectCorrection(scores: FloatArray): Int {
+        require(scores.size == 4)
+        val orientationClass = scores.indices.maxBy { scores[it] }
+        if (orientationClass == 0 || scores[orientationClass] < MIN_ROTATION_CONFIDENCE) return 0
+        return (360 - orientationClass * 90) % 360
     }
-
-    /**
-     * Places isolated Chinese glyphs in a neutral grid before OCR. Comparing whole
-     * pages is unreliable because ML Kit can auto-detect a sideways text line, while
-     * the line angle itself cannot distinguish upright vertical typesetting from a
-     * rotated page. Isolating the glyphs makes the score reflect glyph orientation.
-     */
-    private fun createGlyphSheet(bitmap: Bitmap, glyphBounds: List<Rect>, rotation: Int): Bitmap {
-        val rows = (glyphBounds.size + GLYPH_COLUMNS - 1) / GLYPH_COLUMNS
-        val sheet = Bitmap.createBitmap(
-            GLYPH_COLUMNS * GLYPH_TILE_SIZE,
-            rows * GLYPH_TILE_SIZE,
-            Bitmap.Config.ARGB_8888,
-        )
-        val canvas = android.graphics.Canvas(sheet).apply { drawColor(Color.WHITE) }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
-        glyphBounds.forEachIndexed { index, source ->
-            val centerX = (index % GLYPH_COLUMNS + 0.5f) * GLYPH_TILE_SIZE
-            val centerY = (index / GLYPH_COLUMNS + 0.5f) * GLYPH_TILE_SIZE
-            val availableSize = GLYPH_TILE_SIZE - GLYPH_TILE_PADDING * 2
-            val scale = availableSize / max(source.width(), source.height())
-            val destination = RectF(
-                centerX - source.width() * scale / 2,
-                centerY - source.height() * scale / 2,
-                centerX + source.width() * scale / 2,
-                centerY + source.height() * scale / 2,
-            )
-
-            canvas.save()
-            canvas.rotate(rotation.toFloat(), centerX, centerY)
-            canvas.drawBitmap(bitmap, source, destination, paint)
-            canvas.restore()
-        }
-        return sheet
-    }
-
-    internal fun selectCorrection(scores: List<RotationScore>): Int {
-        require(scores.isNotEmpty())
-        val ranked = scores.sortedWith(
-            compareByDescending<RotationScore> { it.score }
-                .thenByDescending { it.chineseCharacters }
-                .thenBy { it.rotationDegrees },
-        )
-        val best = ranked.first()
-        if (best.chineseCharacters < MIN_CHINESE_CHARACTERS) return 0
-        if (best.rotationDegrees == 0) return 0
-
-        val runnerUp = ranked.getOrNull(1)
-        if (runnerUp != null && best.score < runnerUp.score * MIN_WINNING_MARGIN) return 0
-        return best.rotationDegrees
-    }
-
-    private fun isChineseCodePoint(codePoint: Int): Boolean {
-        val block = Character.UnicodeBlock.of(codePoint)
-        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS ||
-            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A ||
-            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B ||
-            block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
-    }
-
-    internal data class RotationScore(
-        val rotationDegrees: Int,
-        val chineseCharacters: Int,
-        val score: Double,
-    )
-}
-
-private suspend fun <T> Task<T>.await(): T = suspendCoroutine { continuation ->
-    addOnSuccessListener { result -> continuation.resume(result) }
-    addOnFailureListener { error -> continuation.resumeWithException(error) }
-    addOnCanceledListener { continuation.resumeWithException(CancellationException("Text recognition cancelled")) }
 }

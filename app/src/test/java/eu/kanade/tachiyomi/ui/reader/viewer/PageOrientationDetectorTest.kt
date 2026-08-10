@@ -6,47 +6,36 @@ import org.junit.jupiter.api.Test
 class PageOrientationDetectorTest {
 
     @Test
-    fun `selects decisive rotated Chinese text`() {
+    fun `corrects supplied counterclockwise rotated page clockwise`() {
         val correction = PageOrientationDetector.selectCorrection(
-            listOf(
-                score(0, 3, 2.0),
-                score(90, 8, 10.0),
-                score(180, 2, 1.8),
-                score(270, 1, 1.0),
-            ),
+            floatArrayOf(0.0594876f, 0.0221126f, 0.0332601f, 0.8851397f),
         )
 
         assertEquals(90, correction)
     }
 
     @Test
-    fun `keeps page unchanged when candidates are ambiguous`() {
+    fun `keeps supplied corrected page unchanged`() {
         val correction = PageOrientationDetector.selectCorrection(
-            listOf(
-                score(0, 4, 5.0),
-                score(90, 4, 5.2),
-                score(180, 1, 1.0),
-                score(270, 1, 1.0),
-            ),
+            floatArrayOf(0.7688869f, 0.0772248f, 0.0243888f, 0.1294995f),
         )
 
         assertEquals(0, correction)
     }
 
     @Test
-    fun `keeps page unchanged without enough Chinese text`() {
+    fun `keeps uncertain rotated page unchanged`() {
         val correction = PageOrientationDetector.selectCorrection(
-            listOf(
-                score(0, 0, 0.0),
-                score(90, 1, 4.0),
-                score(180, 0, 0.0),
-                score(270, 0, 0.0),
-            ),
+            floatArrayOf(0.1f, 0.35f, 0.3f, 0.25f),
         )
 
         assertEquals(0, correction)
     }
 
-    private fun score(rotation: Int, characters: Int, score: Double) =
-        PageOrientationDetector.RotationScore(rotation, characters, score)
+    @Test
+    fun `inverts confident model orientations into viewer corrections`() {
+        assertEquals(270, PageOrientationDetector.selectCorrection(floatArrayOf(0.01f, 0.97f, 0.01f, 0.01f)))
+        assertEquals(180, PageOrientationDetector.selectCorrection(floatArrayOf(0.01f, 0.01f, 0.97f, 0.01f)))
+        assertEquals(90, PageOrientationDetector.selectCorrection(floatArrayOf(0.01f, 0.01f, 0.01f, 0.97f)))
+    }
 }

@@ -291,7 +291,7 @@ dependencies {
         exclude(module = "image-decoder")
     }
     implementation(libs.image.decoder)
-    implementation(libs.mlkit.text.recognition.chinese)
+    implementation(libs.onnxruntime.android)
 
     // UI libraries
     implementation(libs.material)

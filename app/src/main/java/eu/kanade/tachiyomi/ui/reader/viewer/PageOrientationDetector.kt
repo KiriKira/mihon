@@ -2,6 +2,10 @@ package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
@@ -18,9 +22,7 @@ import tachiyomi.core.common.util.system.logcat
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
-import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 /** Detects the rotation needed to make Chinese glyphs in a page upright. */
 internal object PageOrientationDetector {
@@ -28,8 +30,10 @@ internal object PageOrientationDetector {
     private const val PREVIEW_MAX_DIMENSION = 1600
     private const val MIN_CHINESE_CHARACTERS = 2
     private const val MIN_WINNING_MARGIN = 1.12
-    private const val MIN_ANGLE_WINNING_MARGIN = 1.25
-    private const val MAX_QUARTER_TURN_ERROR = 30f
+    private const val MAX_GLYPH_SAMPLES = 32
+    private const val GLYPH_COLUMNS = 8
+    private const val GLYPH_TILE_SIZE = 96
+    private const val GLYPH_TILE_PADDING = 8f
 
     private val recognizer by lazy {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
@@ -46,8 +50,19 @@ internal object PageOrientationDetector {
             val unrotatedText = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
             currentCoroutineContext().ensureActive()
 
-            selectCorrectionFromAngles(angleObservations(unrotatedText))?.let {
-                return@withLock it.toFloat()
+            val glyphBounds = chineseGlyphBounds(bitmap, unrotatedText)
+            if (glyphBounds.size >= MIN_CHINESE_CHARACTERS) {
+                val glyphScores = listOf(0, 90, 180, 270).map { rotation ->
+                    val glyphSheet = createGlyphSheet(bitmap, glyphBounds, rotation)
+                    try {
+                        val glyphText = recognizer.process(InputImage.fromBitmap(glyphSheet, 0)).await()
+                        currentCoroutineContext().ensureActive()
+                        score(rotation, glyphText)
+                    } finally {
+                        glyphSheet.recycle()
+                    }
+                }
+                return@withLock selectCorrection(glyphScores).toFloat()
             }
 
             val scores = buildList {
@@ -99,69 +114,65 @@ internal object PageOrientationDetector {
         return RotationScore(rotation, chineseCharacters, weightedConfidence)
     }
 
-    /**
-     * ML Kit can recognize sideways text well enough that comparing OCR confidence
-     * between four rotations is often ambiguous. Its bundled model also reports the
-     * angle of each recognized symbol, which is a direct signal for glyph orientation.
-     */
-    private fun angleObservations(text: Text): List<AngleObservation> = buildList {
+    private fun chineseGlyphBounds(bitmap: Bitmap, text: Text): List<Rect> = buildList {
         text.textBlocks.forEach { block ->
             block.lines.forEach { line ->
                 line.elements.forEach { element ->
-                    element.symbols.forEach { symbol ->
-                        val chineseCharacters = symbol.text.codePoints().filter(::isChineseCodePoint).count().toInt()
-                        if (chineseCharacters > 0) {
-                            val confidence = symbol.confidence.takeIf { it > 0f } ?: 0.5f
-                            add(
-                                AngleObservation(
-                                    angleDegrees = symbol.angle,
-                                    chineseCharacters = chineseCharacters,
-                                    score = chineseCharacters * (0.5 + confidence),
-                                ),
-                            )
-                        }
+                    symbolLoop@ for (symbol in element.symbols) {
+                        if (symbol.text.codePoints().noneMatch(::isChineseCodePoint)) continue@symbolLoop
+                        val bounds = symbol.boundingBox ?: continue@symbolLoop
+                        if (bounds.width() <= 0 || bounds.height() <= 0) continue@symbolLoop
+
+                        val padding = (max(bounds.width(), bounds.height()) * 0.15f).toInt()
+                        add(
+                            Rect(
+                                (bounds.left - padding).coerceAtLeast(0),
+                                (bounds.top - padding).coerceAtLeast(0),
+                                (bounds.right + padding).coerceAtMost(bitmap.width),
+                                (bounds.bottom + padding).coerceAtMost(bitmap.height),
+                            ),
+                        )
+                        if (size == MAX_GLYPH_SAMPLES) return@buildList
                     }
                 }
             }
         }
     }
 
-    internal fun selectCorrectionFromAngles(observations: List<AngleObservation>): Int? {
-        val votes = observations.mapNotNull { observation ->
-            val correction = correctionForAngle(observation.angleDegrees) ?: return@mapNotNull null
-            correction to observation
-        }
-        if (votes.sumOf { it.second.chineseCharacters } < MIN_CHINESE_CHARACTERS) return null
+    /**
+     * Places isolated Chinese glyphs in a neutral grid before OCR. Comparing whole
+     * pages is unreliable because ML Kit can auto-detect a sideways text line, while
+     * the line angle itself cannot distinguish upright vertical typesetting from a
+     * rotated page. Isolating the glyphs makes the score reflect glyph orientation.
+     */
+    private fun createGlyphSheet(bitmap: Bitmap, glyphBounds: List<Rect>, rotation: Int): Bitmap {
+        val rows = (glyphBounds.size + GLYPH_COLUMNS - 1) / GLYPH_COLUMNS
+        val sheet = Bitmap.createBitmap(
+            GLYPH_COLUMNS * GLYPH_TILE_SIZE,
+            rows * GLYPH_TILE_SIZE,
+            Bitmap.Config.ARGB_8888,
+        )
+        val canvas = android.graphics.Canvas(sheet).apply { drawColor(Color.WHITE) }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        val ranked = votes
-            .groupBy({ it.first }, { it.second })
-            .map { (rotation, rotationVotes) ->
-                RotationScore(
-                    rotationDegrees = rotation,
-                    chineseCharacters = rotationVotes.sumOf { it.chineseCharacters },
-                    score = rotationVotes.sumOf { it.score },
-                )
-            }
-            .sortedWith(
-                compareByDescending<RotationScore> { it.score }
-                    .thenByDescending { it.chineseCharacters }
-                    .thenBy { it.rotationDegrees },
+        glyphBounds.forEachIndexed { index, source ->
+            val centerX = (index % GLYPH_COLUMNS + 0.5f) * GLYPH_TILE_SIZE
+            val centerY = (index / GLYPH_COLUMNS + 0.5f) * GLYPH_TILE_SIZE
+            val availableSize = GLYPH_TILE_SIZE - GLYPH_TILE_PADDING * 2
+            val scale = availableSize / max(source.width(), source.height())
+            val destination = RectF(
+                centerX - source.width() * scale / 2,
+                centerY - source.height() * scale / 2,
+                centerX + source.width() * scale / 2,
+                centerY + source.height() * scale / 2,
             )
 
-        val best = ranked.firstOrNull() ?: return null
-        val runnerUp = ranked.getOrNull(1)
-        if (runnerUp != null && best.score < runnerUp.score * MIN_ANGLE_WINNING_MARGIN) return null
-        return best.rotationDegrees
-    }
-
-    private fun correctionForAngle(angleDegrees: Float): Int? {
-        if (!angleDegrees.isFinite()) return null
-        val normalizedAngle = ((angleDegrees % 360f) + 360f) % 360f
-        val nearestQuarterTurn = (normalizedAngle / 90f).roundToInt() * 90
-        val snappedAngle = nearestQuarterTurn % 360
-        val error = abs(normalizedAngle - snappedAngle).let { minOf(it, 360f - it) }
-        if (error > MAX_QUARTER_TURN_ERROR) return null
-        return (360 - snappedAngle) % 360
+            canvas.save()
+            canvas.rotate(rotation.toFloat(), centerX, centerY)
+            canvas.drawBitmap(bitmap, source, destination, paint)
+            canvas.restore()
+        }
+        return sheet
     }
 
     internal fun selectCorrection(scores: List<RotationScore>): Int {
@@ -190,12 +201,6 @@ internal object PageOrientationDetector {
 
     internal data class RotationScore(
         val rotationDegrees: Int,
-        val chineseCharacters: Int,
-        val score: Double,
-    )
-
-    internal data class AngleObservation(
-        val angleDegrees: Float,
         val chineseCharacters: Int,
         val score: Double,
     )

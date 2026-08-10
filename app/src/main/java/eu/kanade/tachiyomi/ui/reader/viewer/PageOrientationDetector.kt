@@ -18,7 +18,9 @@ import tachiyomi.core.common.util.system.logcat
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /** Detects the rotation needed to make Chinese glyphs in a page upright. */
 internal object PageOrientationDetector {
@@ -26,6 +28,8 @@ internal object PageOrientationDetector {
     private const val PREVIEW_MAX_DIMENSION = 1600
     private const val MIN_CHINESE_CHARACTERS = 2
     private const val MIN_WINNING_MARGIN = 1.12
+    private const val MIN_ANGLE_WINNING_MARGIN = 1.25
+    private const val MAX_QUARTER_TURN_ERROR = 30f
 
     private val recognizer by lazy {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
@@ -39,11 +43,19 @@ internal object PageOrientationDetector {
     suspend fun detectCorrection(imageSource: BufferedSource): Float = recognitionMutex.withLock {
         val bitmap = decodePreview(imageSource) ?: return@withLock 0f
         try {
+            val unrotatedText = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+            currentCoroutineContext().ensureActive()
+
+            selectCorrectionFromAngles(angleObservations(unrotatedText))?.let {
+                return@withLock it.toFloat()
+            }
+
             val scores = buildList {
-                for (rotation in listOf(0, 90, 180, 270)) {
-                    val text = recognizer.process(InputImage.fromBitmap(bitmap, rotation)).await()
+                add(score(0, unrotatedText))
+                for (rotation in listOf(90, 180, 270)) {
+                    val rotatedText = recognizer.process(InputImage.fromBitmap(bitmap, rotation)).await()
                     currentCoroutineContext().ensureActive()
-                    add(score(rotation, text))
+                    add(score(rotation, rotatedText))
                 }
             }
             selectCorrection(scores).toFloat()
@@ -87,6 +99,71 @@ internal object PageOrientationDetector {
         return RotationScore(rotation, chineseCharacters, weightedConfidence)
     }
 
+    /**
+     * ML Kit can recognize sideways text well enough that comparing OCR confidence
+     * between four rotations is often ambiguous. Its bundled model also reports the
+     * angle of each recognized symbol, which is a direct signal for glyph orientation.
+     */
+    private fun angleObservations(text: Text): List<AngleObservation> = buildList {
+        text.textBlocks.forEach { block ->
+            block.lines.forEach { line ->
+                line.elements.forEach { element ->
+                    element.symbols.forEach { symbol ->
+                        val chineseCharacters = symbol.text.codePoints().filter(::isChineseCodePoint).count().toInt()
+                        if (chineseCharacters > 0) {
+                            val confidence = symbol.confidence.takeIf { it > 0f } ?: 0.5f
+                            add(
+                                AngleObservation(
+                                    angleDegrees = symbol.angle,
+                                    chineseCharacters = chineseCharacters,
+                                    score = chineseCharacters * (0.5 + confidence),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    internal fun selectCorrectionFromAngles(observations: List<AngleObservation>): Int? {
+        val votes = observations.mapNotNull { observation ->
+            val correction = correctionForAngle(observation.angleDegrees) ?: return@mapNotNull null
+            correction to observation
+        }
+        if (votes.sumOf { it.second.chineseCharacters } < MIN_CHINESE_CHARACTERS) return null
+
+        val ranked = votes
+            .groupBy({ it.first }, { it.second })
+            .map { (rotation, rotationVotes) ->
+                RotationScore(
+                    rotationDegrees = rotation,
+                    chineseCharacters = rotationVotes.sumOf { it.chineseCharacters },
+                    score = rotationVotes.sumOf { it.score },
+                )
+            }
+            .sortedWith(
+                compareByDescending<RotationScore> { it.score }
+                    .thenByDescending { it.chineseCharacters }
+                    .thenBy { it.rotationDegrees },
+            )
+
+        val best = ranked.firstOrNull() ?: return null
+        val runnerUp = ranked.getOrNull(1)
+        if (runnerUp != null && best.score < runnerUp.score * MIN_ANGLE_WINNING_MARGIN) return null
+        return best.rotationDegrees
+    }
+
+    private fun correctionForAngle(angleDegrees: Float): Int? {
+        if (!angleDegrees.isFinite()) return null
+        val normalizedAngle = ((angleDegrees % 360f) + 360f) % 360f
+        val nearestQuarterTurn = (normalizedAngle / 90f).roundToInt() * 90
+        val snappedAngle = nearestQuarterTurn % 360
+        val error = abs(normalizedAngle - snappedAngle).let { minOf(it, 360f - it) }
+        if (error > MAX_QUARTER_TURN_ERROR) return null
+        return (360 - snappedAngle) % 360
+    }
+
     internal fun selectCorrection(scores: List<RotationScore>): Int {
         require(scores.isNotEmpty())
         val ranked = scores.sortedWith(
@@ -113,6 +190,12 @@ internal object PageOrientationDetector {
 
     internal data class RotationScore(
         val rotationDegrees: Int,
+        val chineseCharacters: Int,
+        val score: Double,
+    )
+
+    internal data class AngleObservation(
+        val angleDegrees: Float,
         val chineseCharacters: Int,
         val score: Double,
     )

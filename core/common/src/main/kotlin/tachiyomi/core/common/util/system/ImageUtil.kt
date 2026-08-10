@@ -123,6 +123,31 @@ object ImageUtil {
         return options.outWidth > options.outHeight
     }
 
+    fun shouldRotateToMatchViewport(
+        imageSource: BufferedSource,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): Boolean {
+        val options = extractImageOptions(imageSource)
+        return shouldRotateToMatchViewport(
+            imageWidth = options.outWidth,
+            imageHeight = options.outHeight,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+        )
+    }
+
+    internal fun shouldRotateToMatchViewport(
+        imageWidth: Int,
+        imageHeight: Int,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): Boolean {
+        if (imageWidth <= 0 || imageHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return false
+        if (imageWidth == imageHeight || viewportWidth == viewportHeight) return false
+        return (imageWidth > imageHeight) != (viewportWidth > viewportHeight)
+    }
+
     /**
      * Check whether a wide image is a stitched two-page scan (and therefore safe
      * to split in half) or an intentional double-page spread (大跨页) that crosses

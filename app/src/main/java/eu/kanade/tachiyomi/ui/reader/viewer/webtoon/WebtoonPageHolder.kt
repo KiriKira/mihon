@@ -14,6 +14,7 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.viewer.PageOrientationDetector
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -188,10 +189,14 @@ class WebtoonPageHolder(
         progressIndicator.setProgress(0)
 
         val streamFn = page?.stream ?: return
+        val viewportWidth = viewer.recycler.width.takeIf { it > 0 } ?: Resources.getSystem().displayMetrics.widthPixels
+        val viewportHeight = parentHeight.takeIf { it > 0 } ?: Resources.getSystem().displayMetrics.heightPixels
 
         try {
             val (source, isAnimated) = withIOContext {
-                val source = streamFn().use { process(Buffer().readFrom(it)) }
+                val source = streamFn().use {
+                    process(Buffer().readFrom(it), viewportWidth, viewportHeight)
+                }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 Pair(source, isAnimated)
             }
@@ -215,33 +220,32 @@ class WebtoonPageHolder(
         }
     }
 
-    private fun process(imageSource: BufferedSource): BufferedSource {
-        if (viewer.config.dualPageRotateToFit) {
-            return rotateDualPage(imageSource)
-        }
-
-        if (viewer.config.dualPageSplit) {
-            val isDoublePage = ImageUtil.isWideImage(imageSource)
-            if (isDoublePage) {
-                if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
-                    return imageSource
-                }
+    private suspend fun process(
+        imageSource: BufferedSource,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): BufferedSource {
+        val displayedPage = if (viewer.config.dualPageSplit && ImageUtil.isWideImage(imageSource)) {
+            if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
+                imageSource
+            } else {
                 val upperSide = if (viewer.config.dualPageInvert) ImageUtil.Side.LEFT else ImageUtil.Side.RIGHT
-                return ImageUtil.splitAndMerge(imageSource, upperSide)
+                ImageUtil.splitAndMerge(imageSource, upperSide)
             }
-        }
-
-        return imageSource
-    }
-
-    private fun rotateDualPage(imageSource: BufferedSource): BufferedSource {
-        val isDoublePage = ImageUtil.isWideImage(imageSource)
-        return if (isDoublePage) {
-            val rotation = if (viewer.config.dualPageRotateToFitInvert) -90f else 90f
-            ImageUtil.rotateImage(imageSource, rotation)
         } else {
             imageSource
         }
+
+        val rotation = when {
+            viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(displayedPage)
+            viewer.config.pageAutoRotate && ImageUtil.shouldRotateToMatchViewport(
+                displayedPage,
+                viewportWidth,
+                viewportHeight,
+            ) -> 90f
+            else -> 0f
+        }
+        return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)
     }
 
     /**

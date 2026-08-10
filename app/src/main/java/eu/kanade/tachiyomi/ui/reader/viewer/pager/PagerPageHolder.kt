@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.viewer.PageOrientationDetector
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -148,10 +149,14 @@ class PagerPageHolder(
         progressIndicator?.setProgress(0)
 
         val streamFn = page.stream ?: return
+        val viewportWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val viewportHeight = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
 
         try {
             val (source, isAnimated, background) = withIOContext {
-                val source = streamFn().use { process(item, Buffer().readFrom(it)) }
+                val source = streamFn().use {
+                    process(item, Buffer().readFrom(it), viewportWidth, viewportHeight)
+                }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 val background = if (!isAnimated && viewer.config.automaticBackground) {
                     ImageUtil.chooseBackground(context, source.peek().inputStream())
@@ -185,43 +190,33 @@ class PagerPageHolder(
         }
     }
 
-    private fun process(page: ReaderPage, imageSource: BufferedSource): BufferedSource {
-        if (viewer.config.dualPageRotateToFit) {
-            return rotateDualPage(imageSource)
+    private suspend fun process(
+        page: ReaderPage,
+        imageSource: BufferedSource,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): BufferedSource {
+        val displayedPage = when {
+            !viewer.config.dualPageSplit -> imageSource
+            page is InsertPage -> splitInHalf(imageSource)
+            !ImageUtil.isWideImage(imageSource) -> imageSource
+            viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource) -> imageSource
+            else -> {
+                onPageSplit(page)
+                splitInHalf(imageSource)
+            }
         }
 
-        if (!viewer.config.dualPageSplit) {
-            return imageSource
+        val rotation = when {
+            viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(displayedPage)
+            viewer.config.pageAutoRotate && ImageUtil.shouldRotateToMatchViewport(
+                displayedPage,
+                viewportWidth,
+                viewportHeight,
+            ) -> 90f
+            else -> 0f
         }
-
-        if (page is InsertPage) {
-            return splitInHalf(imageSource)
-        }
-
-        val isDoublePage = ImageUtil.isWideImage(imageSource)
-        if (!isDoublePage) {
-            return imageSource
-        }
-
-        // Smart skip: do not split if the wide page is a real double-page spread
-        // (artwork crosses the gutter) instead of two stitched single pages.
-        if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
-            return imageSource
-        }
-
-        onPageSplit(page)
-
-        return splitInHalf(imageSource)
-    }
-
-    private fun rotateDualPage(imageSource: BufferedSource): BufferedSource {
-        val isDoublePage = ImageUtil.isWideImage(imageSource)
-        return if (isDoublePage) {
-            val rotation = if (viewer.config.dualPageRotateToFitInvert) -90f else 90f
-            ImageUtil.rotateImage(imageSource, rotation)
-        } else {
-            imageSource
-        }
+        return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)
     }
 
     private fun splitInHalf(imageSource: BufferedSource): BufferedSource {

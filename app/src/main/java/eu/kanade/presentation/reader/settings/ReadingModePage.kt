@@ -126,18 +126,26 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
         )
     }
 
-    val dualPageRotateToFit by viewModel.preferences.dualPageRotateToFit.collectAsState()
+    val pageAutoRotate by viewModel.preferences.pageAutoRotatePaged.collectAsState()
+    val pageForceUpright by viewModel.preferences.pageForceUprightPaged.collectAsState()
     CheckboxItem(
-        label = stringResource(MR.strings.pref_page_rotate),
-        pref = viewModel.preferences.dualPageRotateToFit,
+        label = stringResource(MR.strings.pref_page_auto_rotate),
+        checked = pageAutoRotate,
+        onClick = {
+            val enabled = !pageAutoRotate
+            viewModel.preferences.pageAutoRotatePaged.set(enabled)
+            if (enabled) viewModel.preferences.pageForceUprightPaged.set(false)
+        },
     )
-
-    if (dualPageRotateToFit) {
-        CheckboxItem(
-            label = stringResource(MR.strings.pref_page_rotate_invert),
-            pref = viewModel.preferences.dualPageRotateToFitInvert,
-        )
-    }
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_page_force_upright),
+        checked = pageForceUpright,
+        onClick = {
+            val enabled = !pageForceUpright
+            viewModel.preferences.pageForceUprightPaged.set(enabled)
+            if (enabled) viewModel.preferences.pageAutoRotatePaged.set(false)
+        },
+    )
 }
 
 @Composable
@@ -189,18 +197,26 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
         )
     }
 
-    val dualPageRotateToFitWebtoon by viewModel.preferences.dualPageRotateToFitWebtoon.collectAsState()
+    val pageAutoRotate by viewModel.preferences.pageAutoRotateWebtoon.collectAsState()
+    val pageForceUpright by viewModel.preferences.pageForceUprightWebtoon.collectAsState()
     CheckboxItem(
-        label = stringResource(MR.strings.pref_page_rotate),
-        pref = viewModel.preferences.dualPageRotateToFitWebtoon,
+        label = stringResource(MR.strings.pref_page_auto_rotate),
+        checked = pageAutoRotate,
+        onClick = {
+            val enabled = !pageAutoRotate
+            viewModel.preferences.pageAutoRotateWebtoon.set(enabled)
+            if (enabled) viewModel.preferences.pageForceUprightWebtoon.set(false)
+        },
     )
-
-    if (dualPageRotateToFitWebtoon) {
-        CheckboxItem(
-            label = stringResource(MR.strings.pref_page_rotate_invert),
-            pref = viewModel.preferences.dualPageRotateToFitInvertWebtoon,
-        )
-    }
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_page_force_upright),
+        checked = pageForceUpright,
+        onClick = {
+            val enabled = !pageForceUpright
+            viewModel.preferences.pageForceUprightWebtoon.set(enabled)
+            if (enabled) viewModel.preferences.pageAutoRotateWebtoon.set(false)
+        },
+    )
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_double_tap_zoom),

@@ -678,6 +678,10 @@
     <string name="overlay_header">封面附加元素</string>
     <string name="pref_page_rotate">旋轉寬頁以符合螢幕</string>
     <string name="pref_page_rotate_invert">調換旋轉寬頁方向</string>
+    <string name="pref_page_auto_rotate">自動旋轉顯示本頁</string>
+    <string name="pref_page_auto_rotate_summary">本頁方向與螢幕不一致時只旋轉圖片，不旋轉應用程式或手機版面</string>
+    <string name="pref_page_force_upright">強制本頁正向顯示</string>
+    <string name="pref_page_force_upright_summary">在本機根據漢字方向判斷並修正本頁朝向</string>
     <string name="pref_debug_info">偵錯資訊</string>
     <string name="pref_chapter_swipe_start">向左滑動章節</string>
     <string name="pref_double_tap_zoom">輕觸兩下以縮放</string>

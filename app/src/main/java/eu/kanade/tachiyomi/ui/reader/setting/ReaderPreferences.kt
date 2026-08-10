@@ -118,20 +118,21 @@ class ReaderPreferences(
     val dualPageSplitSkipSpread: Preference<Boolean> =
         preferenceStore.getBoolean("pref_dual_page_split_skip_spread", true)
 
-    val dualPageRotateToFit: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_rotate", false)
+    // Keep the old storage keys so existing "rotate wide pages" users migrate to auto-rotate.
+    val pageAutoRotatePaged: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_rotate", false)
 
-    val dualPageRotateToFitInvert: Preference<Boolean> = preferenceStore.getBoolean(
-        "pref_dual_page_rotate_invert",
-        false,
-    )
-
-    val dualPageRotateToFitWebtoon: Preference<Boolean> = preferenceStore.getBoolean(
+    val pageAutoRotateWebtoon: Preference<Boolean> = preferenceStore.getBoolean(
         "pref_dual_page_rotate_webtoon",
         false,
     )
 
-    val dualPageRotateToFitInvertWebtoon: Preference<Boolean> = preferenceStore.getBoolean(
-        "pref_dual_page_rotate_invert_webtoon",
+    val pageForceUprightPaged: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_page_force_upright",
+        false,
+    )
+
+    val pageForceUprightWebtoon: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_page_force_upright_webtoon",
         false,
     )
 

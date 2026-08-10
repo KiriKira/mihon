@@ -684,6 +684,10 @@
     <string name="overlay_header">标记和按钮</string>
     <string name="pref_page_rotate">旋转横向图片</string>
     <string name="pref_page_rotate_invert">旋转横向图片时反转方向</string>
+    <string name="pref_page_auto_rotate">自动旋转显示本页</string>
+    <string name="pref_page_auto_rotate_summary">本页方向与屏幕不一致时只旋转图片，不旋转应用或手机布局</string>
+    <string name="pref_page_force_upright">强制本页正向显示</string>
+    <string name="pref_page_force_upright_summary">在本机根据汉字方向判断并修正本页朝向</string>
     <string name="pref_debug_info">调试信息</string>
     <string name="pref_chapter_swipe_end">向右滑动章节</string>
     <string name="pref_chapter_swipe_start">向左滑动章节</string>

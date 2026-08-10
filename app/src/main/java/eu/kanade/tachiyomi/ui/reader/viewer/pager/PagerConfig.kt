@@ -98,15 +98,15 @@ class PagerConfig(
         readerPreferences.dualPageSplitSkipSpread
             .register({ dualPageSkipSpread = it }, { imagePropertyChangedListener?.invoke() })
 
-        readerPreferences.dualPageRotateToFit
+        readerPreferences.pageAutoRotatePaged
             .register(
-                { dualPageRotateToFit = it },
+                { pageAutoRotate = it },
                 { imagePropertyChangedListener?.invoke() },
             )
 
-        readerPreferences.dualPageRotateToFitInvert
+        readerPreferences.pageForceUprightPaged
             .register(
-                { dualPageRotateToFitInvert = it },
+                { pageForceUpright = it },
                 { imagePropertyChangedListener?.invoke() },
             )
     }

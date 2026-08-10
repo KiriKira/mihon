@@ -39,10 +39,10 @@ abstract class ViewerConfig(readerPreferences: ReaderPreferences, private val sc
     var dualPageSkipSpread = true
         protected set
 
-    var dualPageRotateToFit = false
+    var pageAutoRotate = false
         protected set
 
-    var dualPageRotateToFitInvert = false
+    var pageForceUpright = false
         protected set
 
     abstract var navigator: ViewerNavigation

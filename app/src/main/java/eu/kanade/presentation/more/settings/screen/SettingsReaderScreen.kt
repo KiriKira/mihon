@@ -192,12 +192,12 @@ object SettingsReaderScreen : SearchableSettings {
         val navModePref = readerPreferences.navigationModePager
         val imageScaleTypePref = readerPreferences.imageScaleType
         val dualPageSplitPref = readerPreferences.dualPageSplitPaged
-        val rotateToFitPref = readerPreferences.dualPageRotateToFit
+        val pageAutoRotatePref = readerPreferences.pageAutoRotatePaged
+        val pageForceUprightPref = readerPreferences.pageForceUprightPaged
 
         val navMode by navModePref.collectAsState()
         val imageScaleType by imageScaleTypePref.collectAsState()
         val dualPageSplit by dualPageSplitPref.collectAsState()
-        val rotateToFit by rotateToFitPref.collectAsState()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pager_viewer),
@@ -252,10 +252,6 @@ object SettingsReaderScreen : SearchableSettings {
                 Preference.PreferenceItem.SwitchPreference(
                     preference = dualPageSplitPref,
                     title = stringResource(MR.strings.pref_dual_page_split),
-                    onValueChanged = {
-                        rotateToFitPref.set(false)
-                        true
-                    },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.dualPageInvertPaged,
@@ -270,17 +266,22 @@ object SettingsReaderScreen : SearchableSettings {
                     enabled = dualPageSplit,
                 ),
                 Preference.PreferenceItem.SwitchPreference(
-                    preference = rotateToFitPref,
-                    title = stringResource(MR.strings.pref_page_rotate),
-                    onValueChanged = {
-                        dualPageSplitPref.set(false)
+                    preference = pageAutoRotatePref,
+                    title = stringResource(MR.strings.pref_page_auto_rotate),
+                    subtitle = stringResource(MR.strings.pref_page_auto_rotate_summary),
+                    onValueChanged = { enabled ->
+                        if (enabled) pageForceUprightPref.set(false)
                         true
                     },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.dualPageRotateToFitInvert,
-                    title = stringResource(MR.strings.pref_page_rotate_invert),
-                    enabled = rotateToFit,
+                    preference = pageForceUprightPref,
+                    title = stringResource(MR.strings.pref_page_force_upright),
+                    subtitle = stringResource(MR.strings.pref_page_force_upright_summary),
+                    onValueChanged = { enabled ->
+                        if (enabled) pageAutoRotatePref.set(false)
+                        true
+                    },
                 ),
             ),
         )
@@ -292,12 +293,12 @@ object SettingsReaderScreen : SearchableSettings {
 
         val navModePref = readerPreferences.navigationModeWebtoon
         val dualPageSplitPref = readerPreferences.dualPageSplitWebtoon
-        val rotateToFitPref = readerPreferences.dualPageRotateToFitWebtoon
+        val pageAutoRotatePref = readerPreferences.pageAutoRotateWebtoon
+        val pageForceUprightPref = readerPreferences.pageForceUprightWebtoon
         val webtoonSidePaddingPref = readerPreferences.webtoonSidePadding
 
         val navMode by navModePref.collectAsState()
         val dualPageSplit by dualPageSplitPref.collectAsState()
-        val rotateToFit by rotateToFitPref.collectAsState()
         val webtoonSidePadding by webtoonSidePaddingPref.collectAsState()
 
         return Preference.PreferenceGroup(
@@ -348,10 +349,6 @@ object SettingsReaderScreen : SearchableSettings {
                 Preference.PreferenceItem.SwitchPreference(
                     preference = dualPageSplitPref,
                     title = stringResource(MR.strings.pref_dual_page_split),
-                    onValueChanged = {
-                        rotateToFitPref.set(false)
-                        true
-                    },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.dualPageInvertWebtoon,
@@ -366,17 +363,22 @@ object SettingsReaderScreen : SearchableSettings {
                     enabled = dualPageSplit,
                 ),
                 Preference.PreferenceItem.SwitchPreference(
-                    preference = rotateToFitPref,
-                    title = stringResource(MR.strings.pref_page_rotate),
-                    onValueChanged = {
-                        dualPageSplitPref.set(false)
+                    preference = pageAutoRotatePref,
+                    title = stringResource(MR.strings.pref_page_auto_rotate),
+                    subtitle = stringResource(MR.strings.pref_page_auto_rotate_summary),
+                    onValueChanged = { enabled ->
+                        if (enabled) pageForceUprightPref.set(false)
                         true
                     },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
-                    preference = readerPreferences.dualPageRotateToFitInvertWebtoon,
-                    title = stringResource(MR.strings.pref_page_rotate_invert),
-                    enabled = rotateToFit,
+                    preference = pageForceUprightPref,
+                    title = stringResource(MR.strings.pref_page_force_upright),
+                    subtitle = stringResource(MR.strings.pref_page_force_upright_summary),
+                    onValueChanged = { enabled ->
+                        if (enabled) pageAutoRotatePref.set(false)
+                        true
+                    },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.webtoonDoubleTapZoomEnabled,

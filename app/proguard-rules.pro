@@ -18,6 +18,10 @@
 -keep,allowoptimization class uy.kohesive.injekt.** { public protected *; }
 -keep,allowoptimization class com.squareup.zstd.** { public protected *; }
 
+# ONNX Runtime's JNI bridge looks up these classes and constructors by name.
+# Its Android AAR does not currently ship consumer ProGuard rules.
+-keep class ai.onnxruntime.** { *; }
+
 # From extensions-lib
 -keep,allowoptimization class eu.kanade.tachiyomi.network.interceptor.RateLimitInterceptorKt { public protected *; }
 -keep,allowoptimization class eu.kanade.tachiyomi.network.interceptor.SpecificHostRateLimitInterceptorKt { public protected *; }

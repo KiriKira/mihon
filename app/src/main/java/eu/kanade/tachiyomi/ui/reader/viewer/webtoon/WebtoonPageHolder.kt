@@ -237,7 +237,10 @@ class WebtoonPageHolder(
         }
 
         val rotation = when {
-            viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(displayedPage)
+            viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(
+                page?.takeUnless { viewer.config.dualPageSplit },
+                displayedPage,
+            )
             viewer.config.pageAutoRotate && ImageUtil.shouldRotateToMatchViewport(
                 displayedPage,
                 viewportWidth,

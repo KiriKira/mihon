@@ -17,10 +17,13 @@ import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.PageOrientationDetector
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -36,6 +39,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     val downloadManager: DownloadManager by injectLazy()
 
     private val scope = MainScope()
+    private var orientationPrefetchJob: Job? = null
 
     /**
      * Recycler view used by this viewer.
@@ -198,6 +202,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      */
     override fun destroy() {
         super.destroy()
+        orientationPrefetchJob?.cancel()
         scope.cancel()
     }
 
@@ -209,6 +214,15 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         val pages = page.chapter.pages ?: return
         logcat { "onPageSelected: ${page.number}/${pages.size}" }
         activity.onPageSelected(page)
+
+        orientationPrefetchJob?.cancel()
+        if (config.pageForceUpright && !config.dualPageSplit) {
+            orientationPrefetchJob = scope.launchIO {
+                PageOrientationDetector.prefetch(
+                    pages.drop(page.index + 1).take(ORIENTATION_PREFETCH_PAGES),
+                )
+            }
+        }
 
         // Preload next chapter once we're within the last 5 pages of the current chapter
         val inPreloadRange = pages.size - page.number < 5
@@ -363,3 +377,4 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
 
 // Double the cache size to reduce rebinds/recycles incurred by the extra layout space on scroll direction changes
 private const val RECYCLER_VIEW_CACHE_SIZE = 4
+private const val ORIENTATION_PREFETCH_PAGES = 3

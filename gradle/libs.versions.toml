@@ -55,6 +55,7 @@ markdown = "0.43.0"
 material = "1.12.0"
 materialKolor = "5.0.0"
 mockk = "1.14.11"
+mlkit-text-recognition = "16.0.1"
 moko-resources = "0.26.4"
 okhttp = "5.4.0"
 okio = "3.18.1"
@@ -159,6 +160,8 @@ markdown-core = { module = "com.mikepenz:multiplatform-markdown-renderer", versi
 material = { module = "com.google.android.material:material", version.ref = "material" }
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkit-text-recognition" }
+mlkit-text-recognition-japanese = { module = "com.google.mlkit:text-recognition-japanese", version.ref = "mlkit-text-recognition" }
 moko-resources = { module = "dev.icerock.moko:resources", version.ref = "moko-resources" }
 natural-comparator = { module = "com.github.gpanther:java-nat-sort", version = "natural-comparator-1.1" }
 okhttp-brotli = { module = "com.squareup.okhttp3:okhttp-brotli", version.ref = "okhttp" }

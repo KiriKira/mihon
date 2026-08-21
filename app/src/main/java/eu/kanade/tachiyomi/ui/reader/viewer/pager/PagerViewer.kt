@@ -17,10 +17,13 @@ import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
+import eu.kanade.tachiyomi.ui.reader.viewer.PageOrientationDetector
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import kotlin.math.min
@@ -34,6 +37,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     val downloadManager: DownloadManager by injectLazy()
 
     private val scope = MainScope()
+    private var orientationPrefetchJob: Job? = null
 
     /**
      * View pager used by this viewer. It's abstract to implement L2R, R2L and vertical pagers on
@@ -147,6 +151,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
     override fun destroy() {
         super.destroy()
+        orientationPrefetchJob?.cancel()
         scope.cancel()
     }
 
@@ -226,6 +231,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         val pages = page.chapter.pages ?: return
         logcat { "onReaderPageSelected: ${page.number}/${pages.size}" }
         activity.onPageSelected(page)
+
+        orientationPrefetchJob?.cancel()
+        if (config.pageForceUpright && !config.dualPageSplit && forward && page !is InsertPage) {
+            orientationPrefetchJob = scope.launchIO {
+                PageOrientationDetector.prefetch(
+                    pages.drop(page.index + 1).take(ORIENTATION_PREFETCH_PAGES),
+                )
+            }
+        }
 
         // Notify holder of page change
         getPageHolder(page)?.onPageSelected(forward)
@@ -453,3 +467,5 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         adapter.cleanupPageSplit()
     }
 }
+
+private const val ORIENTATION_PREFETCH_PAGES = 3

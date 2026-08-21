@@ -292,6 +292,8 @@ dependencies {
     }
     implementation(libs.image.decoder)
     implementation(libs.onnxruntime.android)
+    implementation(libs.mlkit.text.recognition.chinese)
+    implementation(libs.mlkit.text.recognition.japanese)
 
     // UI libraries
     implementation(libs.material)

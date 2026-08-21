@@ -1,5 +1,8 @@
 # Page orientation model
 
+Implementation status, known limitations, test-corpus conventions, and future
+experiments are documented in [`docs/page-orientation.md`](../../../../../docs/page-orientation.md).
+
 `page_orientation.onnx` is converted from PaddleOCR's
 `PP-LCNet_x1_0_doc_ori` inference model. It classifies document images into
 0°, 90°, 180°, and 270° orientations.

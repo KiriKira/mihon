@@ -47,10 +47,11 @@ internal object PageOrientationDetector {
     private const val CHANNEL_SIZE = INPUT_SIZE * INPUT_SIZE
     private const val CROP_COUNT = 5
 
-    private const val MIN_CROP_CONFIDENCE = 0.80f
-    private const val MIN_CROP_MARGIN = 0.40f
+    private const val MIN_MEAN_CONFIDENCE = 0.75f
     private const val MIN_VALID_CHARACTERS = 6
     private const val MIN_TEXT_ELEMENTS = 2
+    private const val BOX_ASPECT_RATIO = 1.4f
+    private const val MIN_VERTICAL_MASS = 3.0f
     private const val PREFETCH_RETRY_DELAY_MS = 50L
     private const val PREFETCH_PAGE_GAP_MS = 100L
 
@@ -165,18 +166,40 @@ internal object PageOrientationDetector {
 
         val chinese = recognize(chineseRecognizer, bitmap)
         if (hasSufficientText(chinese)) {
-            return Diagnostic(proposal, cropScores, ScriptEvidence(chinese, null), "accepted_chinese")
+            return acceptOrGuard(proposal, cropScores, chinese, null)
         }
 
         currentCoroutineContext().ensureActive()
         val japanese = recognize(japaneseRecognizer, bitmap)
-        val correction = if (hasSufficientText(japanese)) proposal else 0
-        return Diagnostic(
-            correction,
-            cropScores,
-            ScriptEvidence(chinese, japanese),
-            if (correction == 0) "ocr_rejected" else "accepted_japanese",
-        )
+        return if (hasSufficientText(japanese)) {
+            acceptOrGuard(proposal, cropScores, chinese, japanese)
+        } else {
+            Diagnostic(0, cropScores, ScriptEvidence(chinese, japanese), "ocr_rejected")
+        }
+    }
+
+    /**
+     * OCR proves text exists, not that the page is sideways. On upright pages
+     * with native vertical writing, recognized lines stay tall-and-narrow at
+     * 0°; a genuinely sideways page cannot produce confident vertical lines
+     * before correction. When that vertical mass dominates, trust geometry
+     * over the classifier and keep 0°. This trades recall on sideways pages
+     * whose print text is horizontal (their rotated lines look vertical) for
+     * never rotating an already-upright page - the failure we must avoid.
+     */
+    private fun acceptOrGuard(
+        proposal: Int,
+        cropScores: Map<Int, List<FloatArray>>,
+        chinese: OcrEvidence,
+        japanese: OcrEvidence?,
+    ): Diagnostic {
+        val evidence = ScriptEvidence(chinese, japanese)
+        val verticalMass = chinese.textMass + (japanese?.textMass ?: 0f)
+        return if (verticalMass < MIN_VERTICAL_MASS) {
+            Diagnostic(proposal, cropScores, evidence, "accepted")
+        } else {
+            Diagnostic(0, cropScores, evidence, "geometry_guard_rejected")
+        }
     }
 
     private fun decodePreview(imageSource: BufferedSource): Bitmap? {
@@ -285,43 +308,61 @@ internal object PageOrientationDetector {
         var characters = 0
         var elements = 0
         var score = 0.0
+        var verticalMass = 0f
         text.textBlocks.forEach { block ->
             block.lines.forEach { line ->
+                val box = line.boundingBox
+                val width = box?.width()?.toFloat() ?: 0f
+                val height = box?.height()?.toFloat() ?: 0f
+                val verticalDominant = height >= width * BOX_ASPECT_RATIO
+                val horizontalDominant = width >= height * BOX_ASPECT_RATIO
                 line.elements.forEach { element ->
                     val count = element.text.codePoints().filter(::isCjkCodePoint).count().toInt()
-                    if (count > 0) {
-                        characters += count
-                        elements++
-                        score += count * element.confidence.coerceAtLeast(0f)
+                    if (count == 0) return@forEach
+                    characters += count
+                    elements++
+                    score += count * element.confidence.coerceAtLeast(0f)
+                    // A still-vertical text line on a stored-sideways page is impossible:
+                    // accumulate confident vertical-line mass for the geometry guard.
+                    if (!horizontalDominant || verticalDominant) {
+                        verticalMass += count * element.confidence.coerceAtLeast(0f)
                     }
                 }
             }
         }
-        return OcrEvidence(characters, elements, score)
+        return OcrEvidence(characters, elements, score, verticalMass)
     }
 
+    /**
+     * Accept a correction only when all four pixel rotations agree on the same
+     * aligned class and their strongest-crop confidences average high enough.
+     * Requiring rotation equivariance plus a global mean gate proved more
+     * robust on manga than per-crop confidence/margin thresholds, which let a
+     * single lucky crop dominate or killed pages whose evidence was merely
+     * spread across rotations.
+     */
     internal fun selectConsistentProposal(scoresByPixelRotation: Map<Int, List<FloatArray>>): Int? {
         if (scoresByPixelRotation.keys != QUARTER_TURNS.toSet()) return null
+        var meanConfidence = 0f
         val alignedClasses = QUARTER_TURNS.map { pixelRotation ->
-            val orientationClass = selectOrientationClass(scoresByPixelRotation.getValue(pixelRotation))
-                ?: return null
+            val (orientationClass, confidence) =
+                selectOrientationClass(scoresByPixelRotation.getValue(pixelRotation))
+            meanConfidence += confidence / QUARTER_TURNS.size
             (orientationClass - pixelRotation / 90 + 4) % 4
         }
-        if (alignedClasses.distinct().size != 1) return null
+        if (alignedClasses.distinct().size != 1 || meanConfidence < MIN_MEAN_CONFIDENCE) return null
 
         val orientationClass = alignedClasses.first()
         if (orientationClass == 0) return null
         return (360 - orientationClass * 90) % 360
     }
 
-    internal fun selectOrientationClass(cropScores: List<FloatArray>): Int? {
+    /** Strongest-crop class with its confidence; thresholds applied by the caller. */
+    internal fun selectOrientationClass(cropScores: List<FloatArray>): Pair<Int, Float> {
         require(cropScores.isNotEmpty() && cropScores.all { it.size == 4 })
         val bestCrop = cropScores.maxBy { scores -> scores.max() }
-        val ranked = bestCrop.indices.sortedByDescending(bestCrop::get)
-        val best = ranked[0]
-        if (bestCrop[best] < MIN_CROP_CONFIDENCE) return null
-        if (bestCrop[best] - bestCrop[ranked[1]] < MIN_CROP_MARGIN) return null
-        return best
+        val best = bestCrop.indices.maxBy(bestCrop::get)
+        return best to bestCrop[best]
     }
 
     internal fun hasSufficientText(evidence: OcrEvidence): Boolean =
@@ -342,6 +383,7 @@ internal object PageOrientationDetector {
         val validCharacters: Int,
         val textElements: Int,
         val score: Double,
+        val textMass: Float = 0f,
     )
 
     private data class ModelBuffers(

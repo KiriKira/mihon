@@ -32,6 +32,7 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.isWideStitchedPageEnhanced
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 
@@ -226,7 +227,7 @@ class WebtoonPageHolder(
         viewportHeight: Int,
     ): BufferedSource {
         val displayedPage = if (viewer.config.dualPageSplit && ImageUtil.isWideImage(imageSource)) {
-            if (viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource)) {
+            if (viewer.config.dualPageSkipSpread && !isStitchedPage(imageSource)) {
                 imageSource
             } else {
                 val upperSide = if (viewer.config.dualPageInvert) ImageUtil.Side.LEFT else ImageUtil.Side.RIGHT
@@ -246,6 +247,14 @@ class WebtoonPageHolder(
             else -> 0f
         }
         return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)
+    }
+
+    private fun isStitchedPage(imageSource: BufferedSource): Boolean {
+        return if (viewer.config.dualPageAdvancedSpreadDetection) {
+            ImageUtil.isWideStitchedPageEnhanced(imageSource)
+        } else {
+            ImageUtil.isWideStitchedPage(imageSource)
+        }
     }
 
     /**

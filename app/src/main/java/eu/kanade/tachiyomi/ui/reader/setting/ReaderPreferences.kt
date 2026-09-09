@@ -151,7 +151,7 @@ class ReaderPreferences(
 
     val colorFilterValue: Preference<Int> = preferenceStore.getInt("color_filter_value", 0)
 
-    val colorFilterMode: Preference<Int> = preferenceStore.getInt("pref_color_filter_mode", 0)
+    val colorFilterMode: Preference<Int> = preferenceStore.getInt("color_filter_mode", 0)
 
     val grayscale: Preference<Boolean> = preferenceStore.getBoolean("pref_grayscale", false)
 

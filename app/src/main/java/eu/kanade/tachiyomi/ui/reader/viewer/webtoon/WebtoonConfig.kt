@@ -70,6 +70,9 @@ class WebtoonConfig(
         readerPreferences.dualPageSplitSkipSpread
             .register({ dualPageSkipSpread = it }, { imagePropertyChangedListener?.invoke() })
 
+        readerPreferences.dualPageAdvancedSpreadDetection
+            .register({ dualPageAdvancedSpreadDetection = it }, { imagePropertyChangedListener?.invoke() })
+
         readerPreferences.pageAutoRotateWebtoon
             .register(
                 { pageAutoRotate = it },

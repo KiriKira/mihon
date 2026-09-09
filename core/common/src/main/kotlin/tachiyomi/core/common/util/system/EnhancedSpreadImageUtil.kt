@@ -2,8 +2,8 @@ package tachiyomi.core.common.util.system
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import kotlin.math.max
 import okio.BufferedSource
+import kotlin.math.max
 
 /**
  * Opt-in second-stage spread analysis.

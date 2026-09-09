@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="pref_dual_page_advanced_spread_detection">Enhanced double-page spread detection</string>
-    <string name="pref_dual_page_advanced_spread_detection_summary">Also detect artwork continuity across a centered gutter. More accurate for scanned spreads, with a small extra processing cost.</string>
-</resources>

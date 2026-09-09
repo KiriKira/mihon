@@ -120,10 +120,17 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
             label = stringResource(MR.strings.pref_dual_page_invert),
             pref = viewModel.preferences.dualPageInvertPaged,
         )
+        val skipSpread by viewModel.preferences.dualPageSplitSkipSpread.collectAsState()
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_skip_spread),
             pref = viewModel.preferences.dualPageSplitSkipSpread,
         )
+        if (skipSpread) {
+            CheckboxItem(
+                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
+                pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
+            )
+        }
     }
 
     val pageAutoRotate by viewModel.preferences.pageAutoRotatePaged.collectAsState()
@@ -187,10 +194,17 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
     )
 
     if (dualPageSplitWebtoon) {
+        val skipSpread by viewModel.preferences.dualPageSplitSkipSpread.collectAsState()
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_skip_spread),
             pref = viewModel.preferences.dualPageSplitSkipSpread,
         )
+        if (skipSpread) {
+            CheckboxItem(
+                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
+                pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
+            )
+        }
         CheckboxItem(
             label = stringResource(MR.strings.pref_dual_page_invert),
             pref = viewModel.preferences.dualPageInvertWebtoon,

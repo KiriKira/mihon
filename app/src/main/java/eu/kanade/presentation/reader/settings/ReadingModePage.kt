@@ -127,7 +127,7 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
         )
         if (skipSpread) {
             CheckboxItem(
-                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
+                label = "增强大跨页识别 / Enhanced spread detection",
                 pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
             )
         }
@@ -201,7 +201,7 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
         )
         if (skipSpread) {
             CheckboxItem(
-                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
+                label = "增强大跨页识别 / Enhanced spread detection",
                 pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
             )
         }

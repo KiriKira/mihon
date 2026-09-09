@@ -118,6 +118,9 @@ class ReaderPreferences(
     val dualPageSplitSkipSpread: Preference<Boolean> =
         preferenceStore.getBoolean("pref_dual_page_split_skip_spread", true)
 
+    val dualPageAdvancedSpreadDetection: Preference<Boolean> =
+        preferenceStore.getBoolean("pref_dual_page_advanced_spread_detection", false)
+
     // Keep the old storage keys so existing "rotate wide pages" users migrate to auto-rotate.
     val pageAutoRotatePaged: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_rotate", false)
 
@@ -148,7 +151,7 @@ class ReaderPreferences(
 
     val colorFilterValue: Preference<Int> = preferenceStore.getInt("color_filter_value", 0)
 
-    val colorFilterMode: Preference<Int> = preferenceStore.getInt("color_filter_mode", 0)
+    val colorFilterMode: Preference<Int> = preferenceStore.getInt("pref_color_filter_mode", 0)
 
     val grayscale: Preference<Boolean> = preferenceStore.getBoolean("pref_grayscale", false)
 

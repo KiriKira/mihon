@@ -32,13 +32,9 @@ internal object DoublePageSpreadDetector {
         val leftMeanActiveDensity: Double,
         val rightMeanActiveDensity: Double,
         val nearSeamLuminanceCorrelation: Double = 0.0,
+        val localSeamSupportRatio: Double = 0.0,
     )
 
-    /**
-     * Search a centered band of columns of [luminance] and return the column
-     * (within the band) whose luminance has the lowest standard deviation. That
-     * column is the strongest gutter candidate.
-     */
     fun findBestGutterColumn(
         luminance: IntArray,
         width: Int,
@@ -71,12 +67,8 @@ internal object DoublePageSpreadDetector {
     }
 
     /**
-     * Decide whether a wide image is a stitched double-page scan (and therefore
-     * should be split) rather than an intentional spread.
-     *
-     * This is the legacy classifier. Do not add enhanced continuity heuristics here;
-     * keeping this function stable is what guarantees that the new feature can be
-     * disabled without changing existing behavior.
+     * Legacy classifier. Keep this stable so disabling enhanced detection restores
+     * the previous behavior exactly.
      */
     fun isStitchedDoublePage(
         stats: ColumnStats,
@@ -94,11 +86,6 @@ internal object DoublePageSpreadDetector {
         return stats.mean <= edgeMargin || stats.mean >= 255 - edgeMargin
     }
 
-    /**
-     * Expand a legacy gutter candidate into the contiguous run of gutter-like
-     * columns around it. A run must keep the same dark/bright polarity as the
-     * candidate so nearby artwork cannot be absorbed merely because it is uniform.
-     */
     fun findGutterRun(
         luminance: IntArray,
         width: Int,
@@ -136,15 +123,11 @@ internal object DoublePageSpreadDetector {
     }
 
     /**
-     * Measure visual continuity immediately outside the gutter.
-     *
-     * Two complementary signals are collected:
-     *
-     * 1. activity-density profiles, which work well when matching shapes/effects are
-     *    distributed across both sides of the fold;
-     * 2. near-seam luminance correlation, which handles dense painted spreads where
-     *    both sides are almost always active and therefore the binary activity
-     *    profiles have little useful variance.
+     * Measure both global and local evidence that artwork continues across a physical
+     * gutter. Global correlations alone are not trustworthy: two unrelated pages can
+     * accidentally have very similar top-to-bottom density profiles. The local seam
+     * score therefore asks whether several short vertical windows immediately beside
+     * the gutter also have matching luminance structure.
      */
     fun analyzeCrossGutterContinuity(
         luminance: IntArray,
@@ -203,36 +186,46 @@ internal object DoublePageSpreadDetector {
                 gutter = gutter,
                 maxDistance = min(3, usableContext),
             ),
+            localSeamSupportRatio = findLocalSeamSupportRatio(
+                luminance = luminance,
+                width = width,
+                height = height,
+                gutter = gutter,
+                maxDistance = min(4, usableContext),
+            ),
         )
     }
 
     /**
-     * Enhanced spread veto.
+     * Enhanced spread veto based on corroborated evidence rather than a growing set
+     * of special-case threshold paths.
      *
-     * Normal spreads use correlated activity profiles. Dense full-bleed spreads are
-     * a separate case: both sides can be active on nearly every row, making the
-     * activity correlation weak or even negative. For those pages, require very
-     * high two-sided activity plus a matching near-seam luminance profile.
+     * 1. Require some meaningful content on both sides of the gutter.
+     * 2. Accept a global continuity signal only when short local windows corroborate
+     *    it. This rejects accidental full-height correlations between unrelated pages.
+     * 3. A very strong local seam signal may stand on its own because it represents
+     *    repeated, spatially-local continuation right next to the physical fold.
      */
     fun isLikelyContinuousSpread(
         stats: ContinuityStats,
-        bothSidesActiveThreshold: Double = 0.35,
-        minSideMeanActivityThreshold: Double = 0.30,
-        correlationThreshold: Double = 0.45,
-        denseBothSidesActiveThreshold: Double = 0.80,
-        denseMinSideMeanActivityThreshold: Double = 0.75,
+        minBothSidesActiveRatio: Double = 0.25,
+        minSideMeanActivity: Double = 0.25,
+        rowCorrelationThreshold: Double = 0.45,
         nearSeamCorrelationThreshold: Double = 0.55,
+        localSupportThreshold: Double = 0.05,
+        strongLocalSupportThreshold: Double = 0.25,
     ): Boolean {
         val weakerSideMeanActivity = min(stats.leftMeanActiveDensity, stats.rightMeanActiveDensity)
-        val correlatedActivity = stats.bothSidesActiveRatio >= bothSidesActiveThreshold &&
-            weakerSideMeanActivity >= minSideMeanActivityThreshold &&
-            stats.rowProfileCorrelation >= correlationThreshold
+        val enoughTwoSidedContent = stats.bothSidesActiveRatio >= minBothSidesActiveRatio &&
+            weakerSideMeanActivity >= minSideMeanActivity
+        if (!enoughTwoSidedContent) return false
 
-        val denseSeamContinuity = stats.bothSidesActiveRatio >= denseBothSidesActiveThreshold &&
-            weakerSideMeanActivity >= denseMinSideMeanActivityThreshold &&
+        val globalContinuity = stats.rowProfileCorrelation >= rowCorrelationThreshold ||
             stats.nearSeamLuminanceCorrelation >= nearSeamCorrelationThreshold
+        val locallyCorroborated = stats.localSeamSupportRatio >= localSupportThreshold
+        val strongLocalContinuity = stats.localSeamSupportRatio >= strongLocalSupportThreshold
 
-        return correlatedActivity || denseSeamContinuity
+        return (globalContinuity && locallyCorroborated) || strongLocalContinuity
     }
 
     private fun findNearSeamLuminanceCorrelation(
@@ -271,6 +264,77 @@ internal object DoublePageSpreadDetector {
         return bestCorrelation
     }
 
+    private fun findLocalSeamSupportRatio(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        gutter: GutterRun,
+        maxDistance: Int,
+        minProfileStddev: Double = 8.0,
+        correlationThreshold: Double = 0.65,
+        maxMeanAbsoluteDifference: Double = 50.0,
+    ): Double {
+        if (maxDistance <= 0) return 0.0
+
+        val windowHeight = max(16, (height * 0.09).toInt())
+        val stride = max(1, windowHeight / 2)
+        if (windowHeight > height) return 0.0
+
+        var informativeWindows = 0
+        var supportedWindows = 0
+        var yStart = 0
+        while (yStart + windowHeight <= height) {
+            var informative = false
+            var supported = false
+
+            for (distance in 1..maxDistance) {
+                val leftX = gutter.startX - distance
+                val rightX = gutter.endX + distance
+                if (leftX !in 0 until width || rightX !in 0 until width) continue
+
+                val leftProfile = DoubleArray(windowHeight)
+                val rightProfile = DoubleArray(windowHeight)
+                var absoluteDifferenceSum = 0.0
+                for (offset in 0 until windowHeight) {
+                    val rowOffset = (yStart + offset) * width
+                    val left = luminance[rowOffset + leftX].toDouble()
+                    val right = luminance[rowOffset + rightX].toDouble()
+                    leftProfile[offset] = left
+                    rightProfile[offset] = right
+                    absoluteDifferenceSum += abs(left - right)
+                }
+
+                if (standardDeviation(leftProfile) < minProfileStddev ||
+                    standardDeviation(rightProfile) < minProfileStddev
+                ) {
+                    continue
+                }
+                informative = true
+
+                val correlation = pearsonCorrelation(leftProfile, rightProfile)
+                val meanAbsoluteDifference = absoluteDifferenceSum / windowHeight
+                if (correlation >= correlationThreshold &&
+                    meanAbsoluteDifference <= maxMeanAbsoluteDifference
+                ) {
+                    supported = true
+                    break
+                }
+            }
+
+            if (informative) {
+                informativeWindows++
+                if (supported) supportedWindows++
+            }
+            yStart += stride
+        }
+
+        return if (informativeWindows == 0) {
+            0.0
+        } else {
+            supportedWindows.toDouble() / informativeWindows
+        }
+    }
+
     private fun columnStats(
         luminance: IntArray,
         width: Int,
@@ -287,6 +351,17 @@ internal object DoublePageSpreadDetector {
         val mean = sum / height
         val variance = (sumSq / height) - mean * mean
         return ColumnStats(mean = mean, stddev = sqrt(max(0.0, variance)), x = x)
+    }
+
+    private fun standardDeviation(values: DoubleArray): Double {
+        if (values.isEmpty()) return 0.0
+        val mean = values.average()
+        var variance = 0.0
+        for (value in values) {
+            val delta = value - mean
+            variance += delta * delta
+        }
+        return sqrt(variance / values.size)
     }
 
     private fun pearsonCorrelation(left: DoubleArray, right: DoubleArray): Double {

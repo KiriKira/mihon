@@ -9,141 +9,109 @@ Reduce false splitting of intentional double-page spreads that contain a real, c
 - Keep `pref_dual_page_split_skip_spread` and the existing detector as the baseline behavior.
 - Add a separate opt-in preference for the enhanced detector.
 - Default the new preference to `false`.
-- When the new preference is disabled, `ImageUtil.isWideStitchedPage()` must follow the current legacy path and produce the same result as before this change.
-- The enhanced detector only runs after the legacy detector has already classified the page as a stitched double page. It may veto splitting; it never turns a legacy "real spread" result into "stitched".
-- Pager and webtoon viewers use the same preference and same detector path.
+- When the new preference is disabled, `ImageUtil.isWideStitchedPage()` follows the current legacy path unchanged.
+- The enhanced detector only runs after the legacy detector has classified the page as a stitched double page. It may veto splitting; it never turns a legacy real-spread result into stitched.
+- Pager and webtoon viewers use the same preference and detector path.
 
 ## New preference
 
-Suggested key:
+Key:
 
 `pref_dual_page_advanced_spread_detection`
 
-Suggested UI copy:
+UI copy:
 
 - English: `Enhanced double-page spread detection`
 - Simplified Chinese: `增强大跨页识别`
 
-The switch is exposed only in the in-reader settings and only when wide-page splitting plus "Skip splitting double-page spreads" are enabled.
+The switch is exposed only in the in-reader settings and only when wide-page splitting plus `Skip splitting double-page spreads` are enabled.
 
-## Algorithm
+## Stage 1: legacy detector (unchanged)
 
-### Stage 1: legacy detector (unchanged)
+1. Decode the page at the existing low-resolution target.
+2. Search the centered band for the minimum-standard-deviation gutter candidate.
+3. Apply the existing uniformity, edge-color, and center-distance checks.
+4. If legacy detection says real spread, keep the page whole immediately.
+5. If legacy detection says stitched and enhanced detection is disabled, split exactly as before.
 
-1. Decode the wide page at the existing low-resolution target (~512 px width).
-2. Search the existing centered 5% band.
-3. Find the minimum-standard-deviation gutter candidate column.
-4. Apply the existing uniformity, edge-color, and center-distance checks.
-5. If the legacy result is `false`, keep the page whole immediately.
-6. If the legacy result is `true` and enhanced detection is disabled, split exactly as today.
+## Stage 2: enhanced detector
 
-### Stage 2: enhanced continuity veto (opt-in only)
+### Fixed analysis scale
 
-The failure case this addresses is a true spread whose scan/book fold produces a centered pure white/black gutter. A gutter alone is not sufficient evidence that the two sides are independent pages.
+The enhanced path must not depend on `BitmapFactory.inSampleSize` producing an exact dimension. Decode with a power-of-two sample size that leaves at least the target width, then explicitly scale the analysis bitmap to 512 px wide. All enhanced thresholds therefore operate at a deterministic spatial scale.
 
-Before calculating enhanced metrics, normalize the analysis image to a deterministic spatial scale:
+### Gutter model
 
-1. Use a power-of-two `BitmapFactory.inSampleSize` only as a memory-saving coarse decode step.
-2. Keep the decoded intermediate at or above the target resolution.
-3. Explicitly resize that intermediate to exactly 512 px width (unless the source itself is smaller).
-4. Perform all enhanced thresholds at that normalized resolution.
+Expand the single legacy candidate column into a contiguous gutter run with the same bright/dark polarity. Enhanced analysis starts immediately outside this run.
 
-This is required because `inSampleSize` is not an exact resize request and decoder/image-format differences can otherwise make a nominal 512 px analysis run at 768 px or another width, changing the effective meaning of fixed pixel distances and thresholds.
+## Algorithm v2: corroborated global + local seam evidence
 
-After normalization:
+The first implementation used several hard-AND paths based mainly on whole-image row-density correlations. Real examples showed that this is brittle: speech balloons, white backgrounds, diagonal composition, and dense color art all change those aggregate metrics substantially. More importantly, two unrelated pages can accidentally have strong whole-height correlation.
 
-1. Expand the single candidate column into a contiguous gutter run using the same gutter-like criteria (uniform and near the detected edge color).
-2. Take a context window immediately outside each side of the gutter run (target: ~3% of the normalized image width per side).
-3. For each row, compute an activity density on the left and right. A pixel is active when its luminance differs sufficiently from the gutter luminance; this works for both white and black gutters.
-4. Compute:
-   - `bothSidesActiveRatio`: fraction of rows where both context windows contain meaningful activity.
-   - `rowProfileCorrelation`: Pearson correlation between left/right per-row activity densities.
-   - `leftMeanActiveDensity` / `rightMeanActiveDensity`: average activity on each side.
-   - `nearSeamLuminanceCorrelation`: best correlation of raw luminance profiles at the first few symmetric columns outside the gutter, accepted only when their mean absolute luminance difference is reasonably small.
-5. Classify the page as an intentional spread (veto splitting) when either of two conservative continuity paths succeeds.
+The enhanced detector therefore uses two levels of evidence rather than accumulating special-case threshold paths.
 
-### Path A: correlated activity profile
+### Global evidence
 
-Used for sparse or mixed manga artwork where matching shapes/effects occur on similar rows across the fold.
+From a ~3% context strip on each side of the gutter, compute:
 
-Initial thresholds:
+- `bothSidesActiveRatio`: fraction of rows with meaningful activity on both sides.
+- `leftMeanActiveDensity` / `rightMeanActiveDensity`: average activity density on each side.
+- `rowProfileCorrelation`: Pearson correlation between the left/right per-row activity profiles.
+- `nearSeamLuminanceCorrelation`: best whole-height luminance correlation among the first few symmetric columns outside the gutter, accepted only when their mean absolute luminance difference is small enough.
 
-- context width: 3% of analysed image width per side
-- pixel activity delta from gutter luminance: 35
-- active-row density: 20%
-- `bothSidesActiveRatio >= 0.35`
-- weaker side mean activity `>= 0.30`
-- `rowProfileCorrelation >= 0.45`
+These metrics provide broad evidence but are not sufficient on their own.
 
-### Path B: dense full-bleed continuity
+### Local seam corroboration
 
-Used for painted/color spreads where both sides are active on nearly every row. In this case the binary activity profiles have too little useful variance, so their Pearson correlation may be weak or negative even though the scene clearly continues across the physical fold.
+Split the vertical seam into overlapping short windows (about 9% of image height, 50% overlap). For each window, inspect the first four symmetric column pairs outside the gutter.
 
-Initial thresholds:
+A window is informative when both profiles have enough variance. It is locally supported when at least one symmetric pair has:
 
-- `bothSidesActiveRatio >= 0.80`
-- weaker side mean activity `>= 0.75`
-- inspect the first 3 symmetric columns outside the gutter
-- only consider a symmetric pair when mean absolute luminance difference `<= 45`
-- require `nearSeamLuminanceCorrelation >= 0.55`
+- Pearson correlation >= 0.65, and
+- mean absolute luminance difference <= 50.
 
-This second path is deliberately gated by very high two-sided activity so two ordinary independent pages are not protected merely because they both contain ink near the center.
+`localSeamSupportRatio` is the fraction of informative windows that are locally supported.
 
-## Detector API shape
+This is the key algorithmic change: true spreads should show repeated local continuation near the fold, while accidental whole-height similarity between independent pages should not.
 
-Keep the legacy API available. Add dedicated enhanced analysis functions rather than changing the legacy classification semantics.
+### Final decision
 
-```kotlin
-data class GutterRun(
-    val startX: Int,
-    val endX: Int,
-    val mean: Double,
-)
+First require a broad sanity gate so nearly blank/one-sided pages cannot be protected:
 
-data class ContinuityStats(
-    val bothSidesActiveRatio: Double,
-    val rowProfileCorrelation: Double,
-    val leftMeanActiveDensity: Double,
-    val rightMeanActiveDensity: Double,
-    val nearSeamLuminanceCorrelation: Double,
-)
+- `bothSidesActiveRatio >= 0.25`
+- weaker side mean activity >= 0.25
 
-fun isLikelyContinuousSpread(...): Boolean
-```
+Then veto splitting when either:
 
-The enhanced image-analysis entry point remains separate from the legacy detector so disabling the new switch restores the old behavior exactly.
+1. a global signal exists (`rowProfileCorrelation >= 0.45` OR `nearSeamLuminanceCorrelation >= 0.55`) AND `localSeamSupportRatio >= 0.05`; or
+2. `localSeamSupportRatio >= 0.25`, meaning repeated strong local seam continuity is sufficient by itself.
 
-## Tests
+This replaces the previous sparse-vs-dense special-case paths.
 
-### Existing tests
+## Validation strategy
 
-All current `DoublePageSpreadDetectorTest` cases must remain unchanged and continue to pass.
+Keep all legacy detector tests unchanged. Enhanced tests cover:
 
-### New unit tests
+1. sparse correlated artwork across a white/black gutter;
+2. dense color artwork where row-activity correlation is weak;
+3. mixed artwork where whole-image correlation is only moderate but local seam support is strong;
+4. one-sided/mostly blank pages;
+5. unrelated pages with similar overall activity;
+6. deliberately adversarial unrelated halves with high whole-height correlation but no local seam support;
+7. deterministic 512 px analysis scaling.
 
-Cover synthetic fixtures/stat sets for:
-
-1. Centered white gutter + strongly correlated artwork/activity on both sides -> enhanced mode identifies a real spread.
-2. Centered black gutter + strongly correlated bright artwork on both sides -> enhanced mode identifies a real spread.
-3. Centered gutter + independent/unrelated side activity -> remains stitched.
-4. Centered gutter + content on only one side for most rows -> remains stitched.
-5. Low-variance/constant profiles -> correlation handling is stable (no NaN-driven false veto).
-6. Gutter-run expansion stays bounded and does not consume the context windows.
-7. Sparse-but-correlated real spread matching the second reported false split -> protected by Path A.
-8. Dense full-bleed real spread with weak activity correlation but strong near-seam luminance continuity -> protected by Path B.
-9. Dense independent pages without near-seam correlation -> remain stitched.
-10. Enhanced coarse decode sampling stays power-of-two so a 1536 px source decodes at >=512 px and is then explicitly normalized to 512 px.
+For tuning, use the reported real false-split examples only as local/offline measurements; do not add copyrighted page images to the repository. Also construct adversarial negative samples by pairing left/right halves from different examples. The target is that all reported real spreads are vetoed while mismatched halves remain split.
 
 ## Implementation order
 
-1. Add preference and viewer config property. Default off.
+1. Add preference and viewer config property, default off.
 2. Expose it in the in-reader settings only.
-3. Add gutter-run/context continuity analysis to `DoublePageSpreadDetector` without modifying legacy classification behavior.
-4. Add the dense full-bleed fallback based on near-seam luminance correlation.
-5. Normalize enhanced analysis to a fixed 512 px width after coarse decode.
-6. Pass the flag from pager/webtoon page holders.
-7. Add unit tests for continuity metrics, sampling stability, and legacy compatibility.
-8. Run formatting/unit tests and build an installable arm64 APK artifact from PR Actions.
+3. Keep legacy detector semantics unchanged.
+4. Normalize enhanced analysis to 512 px wide.
+5. Add gutter-run extraction and global metrics.
+6. Add local seam support and replace special-case decision paths with corroborated evidence.
+7. Extend regression tests and run formatting/unit tests.
+8. Build an installable arm64 APK artifact from PR Actions.
 
 ## Rollback / safety
 

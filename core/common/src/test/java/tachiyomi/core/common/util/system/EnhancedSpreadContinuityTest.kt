@@ -1,10 +1,18 @@
 package tachiyomi.core.common.util.system
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class EnhancedSpreadContinuityTest {
+
+    @Test
+    fun `enhanced analysis uses power of two decode before fixed resize`() {
+        assertEquals(2, calculateEnhancedSpreadSampleSize(sourceWidth = 1536))
+        assertEquals(4, calculateEnhancedSpreadSampleSize(sourceWidth = 2048))
+        assertEquals(1, calculateEnhancedSpreadSampleSize(sourceWidth = 900))
+    }
 
     @Test
     fun `sparse but strongly correlated activity is treated as continuous`() {

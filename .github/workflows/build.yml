@@ -64,6 +64,54 @@ jobs:
       - name: Build app
         run: ./gradlew assembleRelease -Pinclude-telemetry -Penable-updater
 
+      - name: Prepare APK signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > signing.p12
+            echo "KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            cp .github/keystore/ci.p12 signing.p12
+            echo "KEY_ALIAS=mihon-ci" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sign installable APK
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS_DIR="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          mkdir -p pr-apk
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*arm64-v8a*.apk)
+          ((${#apks[@]} == 1)) || { echo "Expected exactly one arm64-v8a release APK, found ${#apks[@]}"; exit 1; }
+          apk="${apks[0]}"
+          "$BUILD_TOOLS_DIR/zipalign" -p -f 4 "$apk" pr-apk/mihon-pr-${{ github.event.pull_request.number || 'main' }}-arm64-v8a.aligned.apk
+          "$BUILD_TOOLS_DIR/apksigner" sign \
+            --ks signing.p12 \
+            --ks-type PKCS12 \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out pr-apk/mihon-pr-${{ github.event.pull_request.number || 'main' }}-arm64-v8a.apk \
+            pr-apk/mihon-pr-${{ github.event.pull_request.number || 'main' }}-arm64-v8a.aligned.apk
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs pr-apk/mihon-pr-${{ github.event.pull_request.number || 'main' }}-arm64-v8a.apk
+          rm pr-apk/*.aligned.apk
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: mihon-pr-${{ github.event.pull_request.number || 'main' }}-arm64-v8a-${{ github.sha }}
+          path: pr-apk/*.apk
+          retention-days: 7
+
       - name: Upload mapping
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:

@@ -22,11 +22,9 @@ Suggested key:
 Suggested UI copy:
 
 - English: `Enhanced double-page spread detection`
-- English summary: `Also detect artwork continuity across a centered gutter. More accurate for scanned spreads, with a small extra processing cost.`
 - Simplified Chinese: `增强大跨页识别`
-- Simplified Chinese summary: `进一步识别跨越中央白缝/黑缝的连续画面。对扫描版跨页更准确，但会增加少量处理开销。`
 
-The switch is enabled only when both wide-page splitting and "Skip splitting double-page spreads" are enabled.
+The switch is exposed only in the in-reader settings and only when wide-page splitting plus "Skip splitting double-page spreads" are enabled.
 
 ## Algorithm
 
@@ -43,30 +41,46 @@ The switch is enabled only when both wide-page splitting and "Skip splitting dou
 
 The failure case this addresses is a true spread whose scan/book fold produces a centered pure white/black gutter. A gutter alone is not sufficient evidence that the two sides are independent pages.
 
-1. Analyse a wider centered band only in enhanced mode so there is context on both sides of the gutter.
-2. Expand the single candidate column into a contiguous gutter run using the same gutter-like criteria (uniform and near the detected edge color).
-3. Take a context window immediately outside each side of the gutter run (target: ~3% of the downsampled image width per side).
-4. For each row, compute an activity density on the left and right. A pixel is active when its luminance differs sufficiently from the gutter luminance; this works for both white and black gutters.
-5. Compute:
+1. Expand the single candidate column into a contiguous gutter run using the same gutter-like criteria (uniform and near the detected edge color).
+2. Take a context window immediately outside each side of the gutter run (target: ~3% of the downsampled image width per side).
+3. For each row, compute an activity density on the left and right. A pixel is active when its luminance differs sufficiently from the gutter luminance; this works for both white and black gutters.
+4. Compute:
    - `bothSidesActiveRatio`: fraction of rows where both context windows contain meaningful activity.
    - `rowProfileCorrelation`: Pearson correlation between left/right per-row activity densities.
-6. Classify the page as an intentional spread (veto splitting) only when both metrics exceed conservative thresholds.
+   - `leftMeanActiveDensity` / `rightMeanActiveDensity`: average activity on each side.
+   - `nearSeamLuminanceCorrelation`: best correlation of raw luminance profiles at the first few symmetric columns outside the gutter, accepted only when their mean absolute luminance difference is reasonably small.
+5. Classify the page as an intentional spread (veto splitting) when either of two conservative continuity paths succeeds.
 
-Initial conservative thresholds:
+### Path A: correlated activity profile
+
+Used for sparse or mixed manga artwork where matching shapes/effects occur on similar rows across the fold.
+
+Initial thresholds:
 
 - context width: 3% of analysed image width per side
 - pixel activity delta from gutter luminance: 35
 - active-row density: 20%
-- `bothSidesActiveRatio >= 0.45`
-- `rowProfileCorrelation >= 0.35`
+- `bothSidesActiveRatio >= 0.35`
+- weaker side mean activity `>= 0.30`
+- `rowProfileCorrelation >= 0.45`
 
-These values are intentionally conservative because the enhanced stage should only remove clear false-positive splits.
+### Path B: dense full-bleed continuity
+
+Used for painted/color spreads where both sides are active on nearly every row. In this case the binary activity profiles have too little useful variance, so their Pearson correlation may be weak or negative even though the scene clearly continues across the physical fold.
+
+Initial thresholds:
+
+- `bothSidesActiveRatio >= 0.80`
+- weaker side mean activity `>= 0.75`
+- inspect the first 3 symmetric columns outside the gutter
+- only consider a symmetric pair when mean absolute luminance difference `<= 45`
+- require `nearSeamLuminanceCorrelation >= 0.55`
+
+This second path is deliberately gated by very high two-sided activity so two ordinary independent pages are not protected merely because they both contain ink near the center.
 
 ## Detector API shape
 
-Keep the legacy API available. Add a dedicated analysis function rather than changing the legacy classification semantics.
-
-Proposed structure:
+Keep the legacy API available. Add dedicated enhanced analysis functions rather than changing the legacy classification semantics.
 
 ```kotlin
 data class GutterRun(
@@ -78,12 +92,15 @@ data class GutterRun(
 data class ContinuityStats(
     val bothSidesActiveRatio: Double,
     val rowProfileCorrelation: Double,
+    val leftMeanActiveDensity: Double,
+    val rightMeanActiveDensity: Double,
+    val nearSeamLuminanceCorrelation: Double,
 )
 
 fun isLikelyContinuousSpread(...): Boolean
 ```
 
-`ImageUtil.isWideStitchedPage()` receives an optional `enhancedSpreadDetection: Boolean = false` argument. The default preserves all existing callers and behavior.
+The enhanced image-analysis entry point remains separate from the legacy detector so disabling the new switch restores the old behavior exactly.
 
 ## Tests
 
@@ -93,7 +110,7 @@ All current `DoublePageSpreadDetectorTest` cases must remain unchanged and conti
 
 ### New unit tests
 
-Add synthetic fixtures for:
+Cover synthetic fixtures/stat sets for:
 
 1. Centered white gutter + strongly correlated artwork/activity on both sides -> enhanced mode identifies a real spread.
 2. Centered black gutter + strongly correlated bright artwork on both sides -> enhanced mode identifies a real spread.
@@ -101,19 +118,19 @@ Add synthetic fixtures for:
 4. Centered gutter + content on only one side for most rows -> remains stitched.
 5. Low-variance/constant profiles -> correlation handling is stable (no NaN-driven false veto).
 6. Gutter-run expansion stays bounded and does not consume the context windows.
-
-### Integration behavior
-
-Add/adjust `ImageUtil` tests if practical so the default `enhancedSpreadDetection = false` path is explicitly regression-tested.
+7. Sparse-but-correlated real spread matching the second reported false split -> protected by Path A.
+8. Dense full-bleed real spread with weak activity correlation but strong near-seam luminance continuity -> protected by Path B.
+9. Dense independent pages without near-seam correlation -> remain stitched.
 
 ## Implementation order
 
-1. Add preference, viewer config property, strings, and settings UI. Default off.
-2. Add gutter-run/context continuity analysis to `DoublePageSpreadDetector` without modifying legacy classification behavior.
-3. Extend `ImageUtil.isWideStitchedPage()` with the optional enhanced flag and wider opt-in analysis band.
-4. Pass the flag from pager/webtoon page holders.
-5. Add unit tests for continuity metrics and legacy compatibility.
-6. Run formatting/unit tests and review CI before merge.
+1. Add preference and viewer config property. Default off.
+2. Expose it in the in-reader settings only.
+3. Add gutter-run/context continuity analysis to `DoublePageSpreadDetector` without modifying legacy classification behavior.
+4. Add the dense full-bleed fallback based on near-seam luminance correlation.
+5. Pass the flag from pager/webtoon page holders.
+6. Add unit tests for continuity metrics and legacy compatibility.
+7. Run formatting/unit tests and build an installable arm64 APK artifact from PR Actions.
 
 ## Rollback / safety
 

@@ -31,6 +31,7 @@ internal object DoublePageSpreadDetector {
         val rowProfileCorrelation: Double,
         val leftMeanActiveDensity: Double,
         val rightMeanActiveDensity: Double,
+        val nearSeamLuminanceCorrelation: Double = 0.0,
     )
 
     /**
@@ -135,9 +136,15 @@ internal object DoublePageSpreadDetector {
     }
 
     /**
-     * Measure whether visual activity immediately outside the gutter has a shared
-     * vertical profile on both sides. A real spread with a physical fold often has
-     * a pure gutter line but continuing artwork on matching rows to its left/right.
+     * Measure visual continuity immediately outside the gutter.
+     *
+     * Two complementary signals are collected:
+     *
+     * 1. activity-density profiles, which work well when matching shapes/effects are
+     *    distributed across both sides of the fold;
+     * 2. near-seam luminance correlation, which handles dense painted spreads where
+     *    both sides are almost always active and therefore the binary activity
+     *    profiles have little useful variance.
      */
     fun analyzeCrossGutterContinuity(
         luminance: IntArray,
@@ -189,28 +196,79 @@ internal object DoublePageSpreadDetector {
             rowProfileCorrelation = pearsonCorrelation(leftDensity, rightDensity),
             leftMeanActiveDensity = leftDensity.average(),
             rightMeanActiveDensity = rightDensity.average(),
+            nearSeamLuminanceCorrelation = findNearSeamLuminanceCorrelation(
+                luminance = luminance,
+                width = width,
+                height = height,
+                gutter = gutter,
+                maxDistance = min(3, usableContext),
+            ),
         )
     }
 
     /**
      * Enhanced spread veto.
      *
-     * Do not rely on [ContinuityStats.bothSidesActiveRatio] alone: speech balloons,
-     * bright effects, and diagonal artwork can make one side temporarily look like
-     * the white gutter even when the page is a genuine spread. Require three weaker
-     * signals together instead: enough simultaneous activity, meaningful average
-     * activity on both sides, and a strongly correlated vertical activity profile.
+     * Normal spreads use correlated activity profiles. Dense full-bleed spreads are
+     * a separate case: both sides can be active on nearly every row, making the
+     * activity correlation weak or even negative. For those pages, require very
+     * high two-sided activity plus a matching near-seam luminance profile.
      */
     fun isLikelyContinuousSpread(
         stats: ContinuityStats,
         bothSidesActiveThreshold: Double = 0.35,
         minSideMeanActivityThreshold: Double = 0.30,
         correlationThreshold: Double = 0.45,
+        denseBothSidesActiveThreshold: Double = 0.80,
+        denseMinSideMeanActivityThreshold: Double = 0.75,
+        nearSeamCorrelationThreshold: Double = 0.55,
     ): Boolean {
         val weakerSideMeanActivity = min(stats.leftMeanActiveDensity, stats.rightMeanActiveDensity)
-        return stats.bothSidesActiveRatio >= bothSidesActiveThreshold &&
+        val correlatedActivity = stats.bothSidesActiveRatio >= bothSidesActiveThreshold &&
             weakerSideMeanActivity >= minSideMeanActivityThreshold &&
             stats.rowProfileCorrelation >= correlationThreshold
+
+        val denseSeamContinuity = stats.bothSidesActiveRatio >= denseBothSidesActiveThreshold &&
+            weakerSideMeanActivity >= denseMinSideMeanActivityThreshold &&
+            stats.nearSeamLuminanceCorrelation >= nearSeamCorrelationThreshold
+
+        return correlatedActivity || denseSeamContinuity
+    }
+
+    private fun findNearSeamLuminanceCorrelation(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        gutter: GutterRun,
+        maxDistance: Int,
+        maxMeanAbsoluteDifference: Double = 45.0,
+    ): Double {
+        if (maxDistance <= 0) return 0.0
+
+        var bestCorrelation = 0.0
+        for (distance in 1..maxDistance) {
+            val leftX = gutter.startX - distance
+            val rightX = gutter.endX + distance
+            if (leftX !in 0 until width || rightX !in 0 until width) continue
+
+            val leftProfile = DoubleArray(height)
+            val rightProfile = DoubleArray(height)
+            var absoluteDifferenceSum = 0.0
+            for (y in 0 until height) {
+                val rowOffset = y * width
+                val left = luminance[rowOffset + leftX].toDouble()
+                val right = luminance[rowOffset + rightX].toDouble()
+                leftProfile[y] = left
+                rightProfile[y] = right
+                absoluteDifferenceSum += abs(left - right)
+            }
+
+            val meanAbsoluteDifference = absoluteDifferenceSum / height
+            if (meanAbsoluteDifference > maxMeanAbsoluteDifference) continue
+
+            bestCorrelation = max(bestCorrelation, pearsonCorrelation(leftProfile, rightProfile))
+        }
+        return bestCorrelation
     }
 
     private fun columnStats(

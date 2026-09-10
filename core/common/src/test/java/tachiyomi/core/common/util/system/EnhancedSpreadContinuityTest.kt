@@ -19,6 +19,32 @@ class EnhancedSpreadContinuityTest {
     }
 
     @Test
+    fun `dense painted spread can use near seam luminance continuity`() {
+        val stats = DoublePageSpreadDetector.ContinuityStats(
+            bothSidesActiveRatio = 0.93,
+            rowProfileCorrelation = -0.18,
+            leftMeanActiveDensity = 0.97,
+            rightMeanActiveDensity = 0.89,
+            nearSeamLuminanceCorrelation = 0.65,
+        )
+
+        assertTrue(DoublePageSpreadDetector.isLikelyContinuousSpread(stats))
+    }
+
+    @Test
+    fun `dense unrelated pages are not protected without seam correlation`() {
+        val stats = DoublePageSpreadDetector.ContinuityStats(
+            bothSidesActiveRatio = 0.94,
+            rowProfileCorrelation = 0.02,
+            leftMeanActiveDensity = 0.91,
+            rightMeanActiveDensity = 0.88,
+            nearSeamLuminanceCorrelation = 0.18,
+        )
+
+        assertFalse(DoublePageSpreadDetector.isLikelyContinuousSpread(stats))
+    }
+
+    @Test
     fun `correlation alone is not enough when one side is mostly blank`() {
         val stats = DoublePageSpreadDetector.ContinuityStats(
             bothSidesActiveRatio = 0.38,

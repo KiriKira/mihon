@@ -41,8 +41,19 @@ The switch is exposed only in the in-reader settings and only when wide-page spl
 
 The failure case this addresses is a true spread whose scan/book fold produces a centered pure white/black gutter. A gutter alone is not sufficient evidence that the two sides are independent pages.
 
+Before calculating enhanced metrics, normalize the analysis image to a deterministic spatial scale:
+
+1. Use a power-of-two `BitmapFactory.inSampleSize` only as a memory-saving coarse decode step.
+2. Keep the decoded intermediate at or above the target resolution.
+3. Explicitly resize that intermediate to exactly 512 px width (unless the source itself is smaller).
+4. Perform all enhanced thresholds at that normalized resolution.
+
+This is required because `inSampleSize` is not an exact resize request and decoder/image-format differences can otherwise make a nominal 512 px analysis run at 768 px or another width, changing the effective meaning of fixed pixel distances and thresholds.
+
+After normalization:
+
 1. Expand the single candidate column into a contiguous gutter run using the same gutter-like criteria (uniform and near the detected edge color).
-2. Take a context window immediately outside each side of the gutter run (target: ~3% of the downsampled image width per side).
+2. Take a context window immediately outside each side of the gutter run (target: ~3% of the normalized image width per side).
 3. For each row, compute an activity density on the left and right. A pixel is active when its luminance differs sufficiently from the gutter luminance; this works for both white and black gutters.
 4. Compute:
    - `bothSidesActiveRatio`: fraction of rows where both context windows contain meaningful activity.
@@ -121,6 +132,7 @@ Cover synthetic fixtures/stat sets for:
 7. Sparse-but-correlated real spread matching the second reported false split -> protected by Path A.
 8. Dense full-bleed real spread with weak activity correlation but strong near-seam luminance continuity -> protected by Path B.
 9. Dense independent pages without near-seam correlation -> remain stitched.
+10. Enhanced coarse decode sampling stays power-of-two so a 1536 px source decodes at >=512 px and is then explicitly normalized to 512 px.
 
 ## Implementation order
 
@@ -128,9 +140,10 @@ Cover synthetic fixtures/stat sets for:
 2. Expose it in the in-reader settings only.
 3. Add gutter-run/context continuity analysis to `DoublePageSpreadDetector` without modifying legacy classification behavior.
 4. Add the dense full-bleed fallback based on near-seam luminance correlation.
-5. Pass the flag from pager/webtoon page holders.
-6. Add unit tests for continuity metrics and legacy compatibility.
-7. Run formatting/unit tests and build an installable arm64 APK artifact from PR Actions.
+5. Normalize enhanced analysis to a fixed 512 px width after coarse decode.
+6. Pass the flag from pager/webtoon page holders.
+7. Add unit tests for continuity metrics, sampling stability, and legacy compatibility.
+8. Run formatting/unit tests and build an installable arm64 APK artifact from PR Actions.
 
 ## Rollback / safety
 

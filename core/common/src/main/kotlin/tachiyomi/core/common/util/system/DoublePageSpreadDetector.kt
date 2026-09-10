@@ -29,6 +29,8 @@ internal object DoublePageSpreadDetector {
     data class ContinuityStats(
         val bothSidesActiveRatio: Double,
         val rowProfileCorrelation: Double,
+        val leftMeanActiveDensity: Double,
+        val rightMeanActiveDensity: Double,
     )
 
     /**
@@ -157,7 +159,7 @@ internal object DoublePageSpreadDetector {
         require(activeRowDensity in 0.0..1.0) { "activeRowDensity out of range" }
 
         val usableContext = min(contextWidth, min(gutter.startX, width - gutter.endX - 1))
-        if (usableContext <= 0) return ContinuityStats(0.0, 0.0)
+        if (usableContext <= 0) return ContinuityStats(0.0, 0.0, 0.0, 0.0)
 
         val leftDensity = DoubleArray(height)
         val rightDensity = DoubleArray(height)
@@ -185,15 +187,29 @@ internal object DoublePageSpreadDetector {
         return ContinuityStats(
             bothSidesActiveRatio = bothActiveRows.toDouble() / height,
             rowProfileCorrelation = pearsonCorrelation(leftDensity, rightDensity),
+            leftMeanActiveDensity = leftDensity.average(),
+            rightMeanActiveDensity = rightDensity.average(),
         )
     }
 
+    /**
+     * Enhanced spread veto.
+     *
+     * Do not rely on [ContinuityStats.bothSidesActiveRatio] alone: speech balloons,
+     * bright effects, and diagonal artwork can make one side temporarily look like
+     * the white gutter even when the page is a genuine spread. Require three weaker
+     * signals together instead: enough simultaneous activity, meaningful average
+     * activity on both sides, and a strongly correlated vertical activity profile.
+     */
     fun isLikelyContinuousSpread(
         stats: ContinuityStats,
-        bothSidesActiveThreshold: Double = 0.45,
-        correlationThreshold: Double = 0.35,
+        bothSidesActiveThreshold: Double = 0.35,
+        minSideMeanActivityThreshold: Double = 0.30,
+        correlationThreshold: Double = 0.45,
     ): Boolean {
+        val weakerSideMeanActivity = min(stats.leftMeanActiveDensity, stats.rightMeanActiveDensity)
         return stats.bothSidesActiveRatio >= bothSidesActiveThreshold &&
+            weakerSideMeanActivity >= minSideMeanActivityThreshold &&
             stats.rowProfileCorrelation >= correlationThreshold
     }
 

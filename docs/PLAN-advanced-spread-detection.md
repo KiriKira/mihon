@@ -1,294 +1,437 @@
-# Advanced double-page spread detection plan v3
+# PLAN: Learned double-page spread classification
 
-## Why the current approach is being replaced
+## Status
 
-The legacy detector asks a deliberately narrow question: is there a very uniform near-white or near-black column close to the image center? If yes, it assumes that column is a page gutter and treats the image as two independent pages.
+This supersedes the previous enhanced seam-continuity heuristic plan and implementation.
 
-That is useful as a cheap baseline, but it cannot distinguish these two cases:
+The existing `pref_dual_page_advanced_spread_detection` reader switch is retained as the opt-in gate, but the current enhanced heuristic implementation (`GutterRun`, `ContinuityStats`, activity/correlation/local-seam thresholds) should be removed rather than tuned further.
 
-1. two independent pages stitched side-by-side; and
-2. an intentional double-page spread whose physical book fold / scan leaves a white or black center gutter.
+The legacy detector remains untouched for compatibility when the enhanced switch is off.
 
-The first enhanced implementation tried to recover that distinction from handcrafted seam statistics: gutter width, per-row activity, left/right correlation, near-seam luminance correlation, and local seam support. Real examples show that this remains fundamentally brittle. Speech balloons, large white areas, diagonal compositions, dense color artwork, and spreads whose two halves are compositionally related but not pixel-continuous can all defeat seam-based rules.
+## Problem statement
 
-The enhanced heuristic implementation should therefore be removed rather than extended with more threshold paths.
+The original "Skip splitting double-page spreads" detector is intentionally simple: it scans a narrow center band and treats a nearly uniform pure-white/pure-black center column as evidence that the image is two stitched pages.
+
+That assumption is useful for many scans, but the reported false-split samples demonstrate a fundamental ambiguity:
+
+- real double-page artwork can contain a physical scan gutter;
+- the gutter can be pure white/black and several pixels wide;
+- artwork may be locally discontinuous near the fold because of speech balloons, deliberate whitespace, scan loss, page curvature, or asymmetric composition;
+- therefore gutter width, row-density correlation, near-seam correlation, and similar local metrics cannot reliably distinguish "one composition with a fold" from "two independent pages".
+
+The enhanced feature should therefore solve the actual classification problem:
+
+> Is this landscape image a single intentional double-page composition, or two independent pages stitched side-by-side?
+
+This is a global visual/layout classification problem, not a center-line detection problem.
 
 ## Compatibility contract
 
-- Keep `pref_dual_page_split_skip_spread` and the current legacy detector unchanged.
-- Keep a separate opt-in enhanced preference, default `false`.
-- Enhanced OFF: behavior is exactly the current legacy behavior.
-- Enhanced ON: the legacy detector remains a cheap first stage. When legacy already says "real spread", keep the image whole. When legacy says "split", run the new classifier before splitting.
-- The enhanced classifier may only veto a legacy split. It must never convert a legacy real-spread result into a split.
-- Pager and webtoon use the same preference.
+### Enhanced switch OFF
 
-This keeps rollback trivial and guarantees that the new work does not regress users who leave the switch disabled.
+Behavior must remain identical to current Mihon:
 
-## Core design change
+1. Wide-page splitting is enabled.
+2. `pref_dual_page_split_skip_spread` controls the existing legacy detector.
+3. The original `DoublePageSpreadDetector` result is used unchanged.
+4. No model is loaded and no extra inference cost is paid.
 
-### Old question
+### Enhanced switch ON
 
-`Does artwork look locally continuous across the detected center gutter?`
+The learned classifier becomes the enhanced decision layer for landscape pages.
 
-### New question
+The classifier uses a confidence band rather than forcing every image into one class:
 
-`Does the whole landscape image represent one intentional double-page composition, or two independent pages?`
+- high-confidence `SPREAD` -> keep the image whole;
+- high-confidence `STITCHED` -> allow splitting;
+- uncertain -> fall back to the unchanged legacy detector.
 
-This is an image-classification problem, not a gutter-threshold problem.
+This is deliberately safer than making the model authoritative for uncertain samples and also allows the enhanced mode to improve both kinds of legacy error.
 
-## Proposed classifier
-
-Use a small ONNX binary classifier. Mihon already ships ONNX Runtime, so no new inference framework is required.
-
-Output:
+Initial decision policy:
 
 ```text
-pSpread = P(intentional double-page spread)
+pSpread >= spread_keep_threshold
+    => SPREAD
+
+pSpread <= stitched_split_threshold
+    => STITCHED
+
+otherwise
+    => LEGACY_FALLBACK
 ```
 
-The classifier is invoked only when all are true:
+Initial thresholds for development:
 
-- page is landscape;
-- wide-page splitting is enabled;
-- skip-spread is enabled;
-- enhanced detection is enabled;
-- legacy detector would otherwise split the page.
+- `spread_keep_threshold = 0.80`
+- `stitched_split_threshold = 0.20`
 
-### Inputs
+These are placeholders. Final thresholds must be selected from validation data and calibration results, not tuned against individual reported pages.
 
-Use two visual views so the model receives both composition-level and fold-level information.
+## Remove the current enhanced heuristic implementation
 
-#### Global view
+Delete the current enhanced-only code paths instead of keeping two competing advanced systems:
 
-Letterboxed full page, target around `320 x 224`.
+- `GutterRun`
+- `ContinuityStats`
+- `analyzeCrossGutterContinuity`
+- `findNearSeamLuminanceCorrelation`
+- `findLocalSeamSupportRatio`
+- enhanced activity/correlation threshold logic
+- tests that exist only to lock those thresholds
 
-Purpose:
+Keep only the original legacy detector and its pre-existing tests.
 
-- overall panel layout;
-- shared perspective/background;
-- character and object composition across both halves;
-- whether the image reads as one designed canvas or two unrelated pages.
+The existing enhanced reader preference may be reused so users do not need a new setting or migration.
 
-#### Seam view
+## Model baseline
 
-Centered crop covering roughly 25-30% of image width, resized to around `128 x 224`.
+Start with the simplest model likely to solve the actual problem before introducing a multi-branch architecture.
 
-Purpose:
+### Baseline A: single global view
 
-- physical fold / scan gutter appearance;
-- page margins;
-- structures that approach or cross the center;
-- distinguishing an artificial stitched boundary from a scanned spread fold.
+- architecture: MobileNetV3-Small or an equivalently small mobile CNN;
+- transfer learning from ImageNet weights;
+- input: RGB landscape image resized to `384 x 256`;
+- output: one calibrated scalar `pSpread` in `[0, 1]`;
+- export: ONNX;
+- deployment: `onnxruntime-android`, which the app already uses.
 
-### Network shape
+Do not crop the center out of the global view. The objective is to learn composition, page layout, subjects, perspective, panel structure, whitespace, and the relationship between both halves.
 
-Initial target:
+### Candidate B: global + seam view
+
+Only build this if the single-view baseline fails the validation target.
+
+Candidate B adds a second narrow center crop showing the suspected fold at higher effective resolution:
+
+- global branch: `384 x 256`;
+- seam branch: approximately `128 x 256`;
+- concatenate embeddings before the final classifier.
+
+Candidate B is accepted only if it gives a meaningful improvement on held-out series while staying within the size/latency budget.
+
+The project should not begin with this added complexity.
+
+## Dataset design
+
+Model quality depends more on dataset construction than on architecture.
+
+### Labels
+
+Two classes:
+
+- `SPREAD`: one intentional visual composition spanning both pages.
+- `STITCHED`: two independent pages stored side-by-side.
+
+Ambiguous samples should not be forced into the training set. They may be retained for later analysis.
+
+### Positive samples
+
+Collect genuine known double-page spreads.
+
+High-value positives include:
+
+- artwork that visibly crosses the center;
+- spreads with speech balloons or large whitespace near the center;
+- scanned folds that erase/occlude center content;
+- color full-bleed spreads;
+- asymmetric compositions where the two halves do not locally match;
+- spreads where nothing literally crosses the gutter but the full layout is one composition.
+
+The five user-reported false-split pages committed under `docs/spread-classifier/regression-samples/` are hard-positive regression samples.
+
+### Positive gutter augmentation
+
+For each genuine spread, generate variants that simulate physical book scanning:
+
+- insert white, black, gray, or tinted center gaps;
+- gap width sampled over a realistic range;
+- remove a narrow vertical strip before inserting the gap to simulate content lost in the binding;
+- add asymmetric fold shadows/highlights;
+- apply small left/right vertical offsets;
+- light perspective/skew;
+- blur/downsampling;
+- JPEG/WebP compression;
+- grayscale conversion;
+- brightness/contrast variation.
+
+This explicitly teaches the model that a clean center gutter is not sufficient evidence of two independent pages.
+
+### Negative samples
+
+Construct stitched-page examples from ordinary portrait pages.
+
+Prefer difficult negatives:
+
+- choose both pages from the same series;
+- preferably the same volume/chapter;
+- include adjacent page pairs;
+- include non-adjacent pairs with similar tone/layout;
+- join them with realistic white/black/gray gutters and fold shadows;
+- vary margin cropping and page-edge loss.
+
+This prevents the classifier from cheating through differences in art style.
+
+### Hard-negative mining
+
+After each training round:
+
+1. run the model over a large pool of synthetic/real stitched pages;
+2. collect false `SPREAD` predictions;
+3. add them to the next training round with increased sampling probability.
+
+Important hard negatives include:
+
+- two text-heavy pages with aligned balloons;
+- two dense full-bleed pages;
+- pages with similar horizontal backgrounds;
+- unrelated halves whose luminance/edge statistics happen to correlate;
+- two pages that visually form a plausible panorama by accident.
+
+### Hard-positive mining
+
+Likewise collect real spreads incorrectly classified as `STITCHED`.
+
+Do not solve them by adding runtime special cases. Add them to the dataset and retrain.
+
+## Dataset split rules
+
+Do not randomly split individual pages from the same work across train/validation/test.
+
+Split by series or at minimum by volume so near-duplicate art and layouts cannot leak between sets.
+
+Recommended:
+
+- train: ~80% of series;
+- validation: ~10% of series;
+- test: ~10% of series.
+
+Maintain a small separate `reported-regressions` set containing the user-provided problem samples. This set is a release gate, not the primary metric used to choose thresholds.
+
+## Evaluation
+
+Track at least:
+
+- ROC-AUC;
+- PR-AUC;
+- confusion matrix;
+- `SPREAD` precision/recall;
+- `STITCHED` precision/recall;
+- fallback rate under the two-threshold policy;
+- results grouped by monochrome/color and gutter/no-gutter.
+
+Because a false `SPREAD` decision can prevent a genuinely stitched pair from being split, production thresholds should prioritize precision at both confident ends.
+
+Threshold selection:
+
+1. calibrate output probabilities on the validation set, initially with temperature scaling;
+2. select `spread_keep_threshold` such that confident `SPREAD` precision reaches the chosen safety target (initial target: >= 98%);
+3. select `stitched_split_threshold` such that confident `STITCHED` precision reaches the chosen safety target (initial target: >= 98%);
+4. route the middle confidence region to the legacy detector.
+
+Do not tune thresholds page-by-page.
+
+## Regression samples in this repository
+
+Directory:
+
+`docs/spread-classifier/regression-samples/`
+
+Expected label for all currently committed examples: `SPREAD`.
+
+The repository versions are downsampled preview/regression copies to limit repository growth while preserving the layout and center-gutter failure mode. Their manifest records source hashes so the exact user-supplied originals can be distinguished from the committed derivatives.
+
+The first five cases cover:
+
+1. dynamic action / explosion with a clean center gap;
+2. dialogue/action composition with a clean center gap;
+3. dense color full-bleed composition;
+4. large whitespace and asymmetric character composition;
+5. strongly asymmetric panel/layout composition where local seam similarity is weak.
+
+These files should be used as mandatory regression checks for every candidate model.
+
+## Training tooling
+
+Add an offline tooling directory, for example:
 
 ```text
-Global MobileNetV3-Small tower ----\
-                                   +--> feature concat --> small MLP --> pSpread
-Tiny seam CNN tower ---------------/
+tools/spread-classifier/
+  README.md
+  requirements.txt
+  dataset.py
+  augment.py
+  train.py
+  evaluate.py
+  export_onnx.py
+  calibrate.py
 ```
 
-Requirements:
+Training must not be part of the Android Gradle build.
 
-- INT8 quantized ONNX target size: preferably <= 5 MB;
-- CPU inference only;
-- no dynamic input sizes;
+`evaluate.py` should accept a manifest so local datasets can remain outside the repository.
+
+The committed regression fixtures should be evaluable with a single command.
+
+Example desired workflow:
+
+```text
+python tools/spread-classifier/evaluate.py \
+    --model app/src/main/assets/models/spread_classifier_v1.onnx \
+    --manifest docs/spread-classifier/regression-samples/manifest.csv
+```
+
+## Model artifact constraints
+
+Initial targets:
+
+- ONNX model <= 5 MB after quantization;
+- INT8 preferred if accuracy remains within tolerance;
+- no network access at runtime;
 - deterministic preprocessing;
-- inference is asynchronous and result is cached per page.
+- inference only on eligible landscape pages;
+- model session initialized lazily;
+- session reused across pages;
+- no full-resolution bitmap required.
 
-If the two-tower model is not measurably better than a single full-page MobileNetV3-Small in validation, prefer the simpler single-input model.
+Performance target should be measured on representative Android hardware before merge. Latency targets are goals, not acceptance claims until measured.
 
-## Training data strategy
+## Android runtime design
 
-The main difficulty is labels, so use high-confidence automatic data generation plus a relatively small hard-example set.
-
-### Positive set: intentional spreads
-
-High-confidence seeds:
-
-- landscape pages where the existing legacy detector already sees obvious artwork through the center and therefore refuses to split;
-- manually confirmed hard positives reported during testing.
-
-Augment positives aggressively to simulate the exact failure mode that the legacy detector cannot handle:
-
-- insert a centered white / black / gray gutter;
-- gutter width from 1 px to realistic scan widths;
-- remove several center columns to simulate content lost in the fold;
-- add book-fold shadows / gradients;
-- slight left/right vertical misalignment;
-- JPEG/WebP degradation;
-- grayscale/color conversion;
-- brightness and contrast differences between halves.
-
-The important training lesson is: `a center gutter does not imply two independent pages`.
-
-### Negative set: independent pages
-
-Generate negatives by pairing two portrait pages, preferably from the same title / volume / chapter so the model cannot cheat by detecting different art styles.
-
-Augment with:
-
-- white/black/gray gutters;
-- variable gutter widths;
-- crop and margin variation;
-- slight scan skew;
-- compression artifacts;
-- left/right exposure differences.
-
-### Hard negatives
-
-Construct deliberately confusing negatives:
-
-- pair halves with similar tone and panel density;
-- select pairs whose handcrafted seam correlations are unusually high;
-- pair pages from adjacent positions in the same chapter;
-- pair visually similar full-bleed pages.
-
-### Hard positives
-
-Keep the user-reported false-split examples as local validation/training references, but do not commit copyrighted page images to the repository.
-
-### Dataset split
-
-Split by manga/title, not randomly by page, to avoid style leakage between train and validation sets.
-
-## Decision policy
-
-Because enhanced detection only vetoes splitting, false positives are costly: a true two-page scan would remain unsplit. Start conservatively.
-
-Initial policy:
+Proposed components:
 
 ```text
-if pSpread >= 0.80:
-    keep whole page
-else:
-    follow legacy result and split
+SpreadClassifier
+  - lazy ONNX Runtime session
+  - bitmap preprocessing
+  - inference
+  - calibrated pSpread
+
+SpreadClassification
+  - SPREAD
+  - STITCHED
+  - UNCERTAIN
+
+ImageUtil / reader
+  - legacy path when enhanced switch is OFF
+  - model classification when enhanced switch is ON
+  - legacy fallback for UNCERTAIN
 ```
 
-Tune the threshold from validation ROC/precision-recall data rather than from individual screenshots.
+### Preprocessing
 
-Primary target:
-
-- very high precision for `intentional spread` vetoes;
-- then maximize recall subject to that precision target.
-
-Suggested first acceptance target:
-
-- spread-veto precision >= 97%;
-- maximize recall while staying above that precision.
-
-## Optional chapter-context prior
-
-A later phase can use chapter-level layout as an auxiliary prior, not as a hard rule.
-
-Useful signal:
-
-- one isolated landscape page among many portrait pages is more likely to be an intentional spread;
-- a chapter where most files are landscape is more likely to consist of paired scans that should be split.
-
-Do not block the first classifier implementation on this because neighboring page dimensions are not always available cheaply at decision time. Add only if offline evaluation shows a clear benefit.
-
-## Runtime architecture
-
-```text
-wide page
-   |
-legacy detector
-   |
-   +-- legacy says real spread --> keep whole
-   |
-   +-- legacy says split
-           |
-       enhanced OFF --> split
-           |
-       enhanced ON
-           |
-      SpreadClassifier
-           |
-      pSpread >= T ?
-        /       \
-      yes       no
-       |         |
-   keep whole   split
-```
+- decode directly to a low-resolution bitmap;
+- normalize deterministically to `384 x 256`;
+- preserve the entire image; no center crop in baseline A;
+- use the exact same normalization parameters as training/export;
+- recycle temporary bitmaps promptly.
 
 ### Caching
 
-Cache classification by page/image identity for the reader session so rotations, redraws, pager recreation, or switching viewer modes do not rerun inference unnecessarily.
+Avoid repeated inference for the same page during layout/rebinding.
 
-### Failure behavior
+Start with per-reader-session in-memory caching keyed by chapter/page identity plus source dimensions. Persistent disk caching is unnecessary unless profiling later proves it valuable.
 
-Any model-load, preprocessing, or inference failure must fail open to the legacy result: split exactly as legacy requested. Enhanced detection must never break page loading.
+### Failure handling
 
-## Code replacement plan
+Any model load/inference/preprocessing error must fail open to the legacy detector.
 
-Remove the current enhanced heuristic implementation rather than preserving it behind another path.
+The model must never make the reader unable to display a page.
 
-Delete or collapse:
+## Testing
 
-- `GutterRun` enhanced-only analysis;
-- `ContinuityStats`;
-- activity-density correlation logic;
-- near-seam correlation logic;
-- local seam support logic;
-- threshold-path tests specific to those metrics.
+### Legacy regression
 
-Retain only the legacy `DoublePageSpreadDetector` behavior used when enhanced mode is disabled / before model escalation.
+All original `DoublePageSpreadDetector` tests must pass unchanged.
 
-Introduce:
+### Classifier logic tests
 
-- `SpreadClassifier` interface;
-- ONNX-backed implementation;
-- deterministic image preprocessing helpers;
-- result cache;
-- classifier-focused tests using synthetic/generated fixtures;
-- model metadata/version constants.
+Test:
 
-## Validation plan
+- threshold boundaries;
+- uncertain -> legacy fallback;
+- inference exception -> legacy fallback;
+- enhanced switch off -> model never invoked;
+- session reuse/cache behavior;
+- preprocessing dimensions and channel normalization.
 
-### Unit tests
+### Model regression
 
-1. Enhanced OFF calls only the legacy path.
-2. Legacy real-spread result never invokes the model.
-3. Legacy split + enhanced ON invokes classifier.
-4. High classifier probability vetoes splitting.
-5. Low classifier probability preserves legacy split.
-6. Inference/model failure preserves legacy split.
-7. Preprocessing output dimensions and normalization are deterministic.
-8. Cache prevents repeated inference for the same page.
+The five committed hard-positive samples must all classify as `SPREAD` or fall into a policy result that keeps them whole.
 
-### Model evaluation
+Add hard-negative regression samples before enabling the feature by default. A model that only passes the five positives is not sufficient.
 
-Maintain a separate local evaluation corpus containing:
+### CI
 
-- all reported false-split pages;
-- ordinary stitched two-page scans;
-- difficult speech-balloon-heavy spreads;
-- white-background spreads;
-- color spreads;
-- independent pages with similar layout/tone.
+Add a lightweight model-regression job after the first model exists.
 
-Track confusion matrix, precision, recall, PR curve, and per-category failures. Do not tune a threshold from a single sample.
+It should:
 
-### Regression rule
+1. decode committed regression fixtures;
+2. run ONNX inference;
+3. verify expected policy outcomes;
+4. report probabilities for debugging.
 
-All currently reported false-split examples must be correctly protected by the candidate model before replacing the heuristic implementation.
+Do not retrain the model in normal application CI.
 
 ## Implementation phases
 
-1. Revert/remove the current handcrafted enhanced continuity code, keeping preference wiring and legacy behavior.
-2. Add `SpreadClassifier` abstraction and a fake implementation for reader integration tests.
-3. Build the offline dataset-generation/training/evaluation tooling outside the Android runtime path.
-4. Train baseline single-view and two-view MobileNetV3-Small models.
-5. Compare models using title-separated validation data and hard examples.
-6. Quantize selected model to INT8 ONNX and benchmark Android CPU inference.
-7. Add model asset and ONNX inference implementation.
-8. Tune the conservative veto threshold from validation data.
-9. Run existing tests, new integration tests, and build an installable APK.
-10. Only after model validation, consider chapter-context priors as a separate improvement.
+### Phase 0 - reset the current enhanced experiment
 
-## Rollback / safety
+- retain the reader setting;
+- remove the enhanced seam heuristic implementation and threshold-specific tests;
+- keep legacy detector unchanged.
 
-The enhanced switch remains default-off. Disabling it restores the unchanged legacy algorithm immediately. The new model has no authority to force a split; it can only protect a page that legacy would otherwise split.
+### Phase 1 - dataset/evaluation harness
+
+- commit the regression sample manifest;
+- add training/evaluation scripts;
+- create a labeled local dataset outside the main repo;
+- establish train/validation/test splits by series.
+
+Do not modify runtime classification yet.
+
+### Phase 2 - baseline model
+
+- train single-view MobileNetV3-Small;
+- calibrate;
+- evaluate on held-out series and regression samples;
+- export ONNX;
+- measure model size and Android inference latency.
+
+### Phase 3 - decide whether a seam branch is necessary
+
+Only if baseline A misses the agreed accuracy target:
+
+- train candidate B with global + seam inputs;
+- compare against baseline on the exact same held-out splits;
+- keep B only for a meaningful improvement.
+
+### Phase 4 - Android integration
+
+- implement `SpreadClassifier`;
+- reuse existing enhanced reader switch;
+- use two-threshold tri-state policy with legacy fallback;
+- add caching and graceful failure;
+- remove obsolete enhanced heuristic code completely.
+
+### Phase 5 - validation
+
+Before considering merge:
+
+- legacy-off behavior is byte-for-behavior compatible;
+- all five current hard positives pass;
+- hard negatives pass;
+- held-out-series metrics meet the precision target;
+- APK model-size increase is acceptable;
+- inference latency/memory are measured;
+- Pager and Webtoon paths both behave consistently.
+
+## Rollback
+
+The feature remains opt-in.
+
+Disabling `pref_dual_page_advanced_spread_detection` bypasses the model completely and returns to the unchanged legacy detector.
+
+If the model asset is absent or inference fails, runtime automatically falls back to legacy behavior.

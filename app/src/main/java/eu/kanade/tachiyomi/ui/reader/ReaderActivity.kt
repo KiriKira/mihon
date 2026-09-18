@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -13,11 +14,13 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.View.LAYER_TYPE_HARDWARE
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -134,6 +137,7 @@ class ReaderActivity : BaseActivity() {
     private var menuToggleToast: Toast? = null
     private var readingModeToast: Toast? = null
     private val displayRefreshHost = DisplayRefreshHost()
+    private var readerContentRotation = 0f
 
     private val windowInsetsController by lazy { WindowInsetsControllerCompat(window, window.decorView) }
 
@@ -169,6 +173,9 @@ class ReaderActivity : BaseActivity() {
         binding = ReaderActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.setComposeOverlay()
+        binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            applyReaderContentTransform()
+        }
 
         if (!viewModel.hasValidArgs) {
             finish()
@@ -790,11 +797,118 @@ class ReaderActivity : BaseActivity() {
 
     /**
      * Forces the user preferred [orientation] on the activity.
+     *
+     * Android 16 may letterbox fixed-orientation activities on unfolded large-screen foldables.
+     * For near-square foldable inner displays, keep the activity in the display's natural
+     * orientation and rotate the complete reader surface instead. This preserves a full-screen
+     * portrait layout while also letting Android transform touch coordinates with the content.
      */
     private fun setOrientation(orientation: Int) {
         val newOrientation = ReaderOrientation.fromPreference(orientation)
+        val foldableRotation = if (isWideUnfoldedFoldable()) {
+            when (newOrientation) {
+                ReaderOrientation.PORTRAIT,
+                ReaderOrientation.LOCKED_PORTRAIT,
+                -> -90f
+
+                ReaderOrientation.REVERSE_PORTRAIT -> 90f
+
+                ReaderOrientation.LANDSCAPE,
+                ReaderOrientation.LOCKED_LANDSCAPE,
+                -> 0f
+
+                ReaderOrientation.DEFAULT,
+                ReaderOrientation.FREE,
+                -> null
+            }
+        } else {
+            null
+        }
+
+        if (foldableRotation != null) {
+            setReaderContentRotation(foldableRotation)
+            if (requestedOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            return
+        }
+
+        setReaderContentRotation(0f)
         if (newOrientation.flag != requestedOrientation) {
             requestedOrientation = newOrientation.flag
+        }
+    }
+
+    /**
+     * Detects an unfolded book-style foldable by combining the hinge sensor feature with the
+     * active display's physical aspect ratio. The outer display stays tall and is intentionally
+     * excluded.
+     */
+    @Suppress("DEPRECATION")
+    private fun isWideUnfoldedFoldable(): Boolean {
+        if (!packageManager.hasSystemFeature("android.hardware.sensor.hinge_angle")) {
+            return false
+        }
+
+        val mode = windowManager.defaultDisplay.mode
+        val longSide = maxOf(mode.physicalWidth, mode.physicalHeight)
+        val shortSide = minOf(mode.physicalWidth, mode.physicalHeight)
+        if (shortSide <= 0) {
+            return false
+        }
+
+        return longSide.toFloat() / shortSide <= 1.5f
+    }
+
+    /**
+     * Rotates the entire reader coordinate space. -90 degrees corresponds to holding the
+     * unfolded device with its original right short edge at the bottom.
+     */
+    private fun setReaderContentRotation(rotation: Float) {
+        readerContentRotation = rotation
+        if (!::binding.isInitialized) {
+            return
+        }
+        binding.readerContent.post(::applyReaderContentTransform)
+    }
+
+    private fun applyReaderContentTransform() {
+        if (!::binding.isInitialized) {
+            return
+        }
+
+        val hostWidth = binding.root.width
+        val hostHeight = binding.root.height
+        if (hostWidth <= 0 || hostHeight <= 0) {
+            return
+        }
+
+        val quarterTurn = readerContentRotation == 90f || readerContentRotation == -90f
+        val targetWidth = if (quarterTurn) hostHeight else hostWidth
+        val targetHeight = if (quarterTurn) hostWidth else hostHeight
+
+        val content = binding.readerContent
+        val params = content.layoutParams as FrameLayout.LayoutParams
+        var layoutChanged = false
+
+        if (params.width != targetWidth) {
+            params.width = targetWidth
+            layoutChanged = true
+        }
+        if (params.height != targetHeight) {
+            params.height = targetHeight
+            layoutChanged = true
+        }
+        if (params.gravity != Gravity.CENTER) {
+            params.gravity = Gravity.CENTER
+            layoutChanged = true
+        }
+        if (layoutChanged) {
+            content.layoutParams = params
+        }
+
+        if (content.rotation != readerContentRotation) {
+            content.rotation = readerContentRotation
         }
     }
 

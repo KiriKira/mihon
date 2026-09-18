@@ -808,18 +808,15 @@ class ReaderActivity : BaseActivity() {
         val foldableRotation = if (isWideUnfoldedFoldable()) {
             when (newOrientation) {
                 ReaderOrientation.PORTRAIT,
-                ReaderOrientation.LOCKED_PORTRAIT,
-                -> -90f
+                ReaderOrientation.LOCKED_PORTRAIT -> -90f
 
                 ReaderOrientation.REVERSE_PORTRAIT -> 90f
 
                 ReaderOrientation.LANDSCAPE,
-                ReaderOrientation.LOCKED_LANDSCAPE,
-                -> 0f
+                ReaderOrientation.LOCKED_LANDSCAPE -> 0f
 
                 ReaderOrientation.DEFAULT,
-                ReaderOrientation.FREE,
-                -> null
+                ReaderOrientation.FREE -> null
             }
         } else {
             null
@@ -869,7 +866,7 @@ class ReaderActivity : BaseActivity() {
         if (!::binding.isInitialized) {
             return
         }
-        binding.readerContent.post(::applyReaderContentTransform)
+        binding.readerContent.post { applyReaderContentTransform() }
     }
 
     private fun applyReaderContentTransform() {

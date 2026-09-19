@@ -102,13 +102,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         pager.adapter = adapter
         pager.addOnPageChangeListener(pagerListener)
         pager.tapListener = { event ->
-            val viewPosition = IntArray(2)
-            pager.getLocationOnScreen(viewPosition)
-            val viewPositionRelativeToWindow = IntArray(2)
-            pager.getLocationInWindow(viewPositionRelativeToWindow)
+            // MotionEvent coordinates are already transformed into the pager's local coordinate
+            // space. Using raw screen coordinates breaks navigation regions when the complete
+            // reader surface is rotated on unfolded foldables.
             val pos = PointF(
-                (event.rawX - viewPosition[0] + viewPositionRelativeToWindow[0]) / pager.width,
-                (event.rawY - viewPosition[1] + viewPositionRelativeToWindow[1]) / pager.height,
+                event.x / pager.width,
+                event.y / pager.height,
             )
             when (config.navigator.getAction(pos)) {
                 NavigationRegion.MENU -> activity.toggleMenu()

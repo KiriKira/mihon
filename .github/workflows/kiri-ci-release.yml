@@ -2,7 +2,7 @@ name: Publish fork CI build
 
 on:
   push:
-    branches: [main]
+    branches: [main, reader-foldable-orientation-v1]
   workflow_dispatch:
 
 concurrency:

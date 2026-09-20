@@ -126,15 +126,19 @@ object ImageUtil {
     /**
      * Whether the page should be rotated clockwise for the reader's auto-rotate-page option.
      *
-     * This intentionally depends only on the page itself. Reader/activity orientation and
-     * transient holder dimensions must not affect the result, otherwise recycled holders can
-     * make the same page flip orientation while paging back and forth.
+     * Rotation is only useful while the logical reader surface is portrait. The page must also
+     * be sufficiently landscape-shaped to pass the configured aspect-ratio threshold. Holder
+     * dimensions are deliberately excluded so recycling a holder cannot change the decision.
      */
-    fun shouldAutoRotatePage(imageSource: BufferedSource): Boolean {
+    fun shouldAutoRotatePage(
+        imageSource: BufferedSource,
+        isPortraitDisplay: Boolean,
+    ): Boolean {
         val options = extractImageOptions(imageSource)
         return PageRotationCalculator.shouldRotatePage(
             imageWidth = options.outWidth,
             imageHeight = options.outHeight,
+            isPortraitDisplay = isPortraitDisplay,
         )
     }
 

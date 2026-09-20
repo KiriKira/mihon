@@ -27,6 +27,7 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.isWideStitchedPageEnhanced
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 
@@ -200,7 +201,7 @@ class PagerPageHolder(
             !viewer.config.dualPageSplit -> imageSource
             page is InsertPage -> splitInHalf(imageSource)
             !ImageUtil.isWideImage(imageSource) -> imageSource
-            viewer.config.dualPageSkipSpread && !ImageUtil.isWideStitchedPage(imageSource) -> imageSource
+            viewer.config.dualPageSkipSpread && !isStitchedPage(imageSource) -> imageSource
             else -> {
                 onPageSplit(page)
                 splitInHalf(imageSource)
@@ -217,6 +218,14 @@ class PagerPageHolder(
             else -> 0f
         }
         return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)
+    }
+
+    private fun isStitchedPage(imageSource: BufferedSource): Boolean {
+        return if (viewer.config.dualPageAdvancedSpreadDetection) {
+            ImageUtil.isWideStitchedPageEnhanced(imageSource)
+        } else {
+            ImageUtil.isWideStitchedPage(imageSource)
+        }
     }
 
     private fun splitInHalf(imageSource: BufferedSource): BufferedSource {

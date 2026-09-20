@@ -123,31 +123,20 @@ object ImageUtil {
         return options.outWidth > options.outHeight
     }
 
-    fun shouldRotateToMatchViewport(
-        imageSource: BufferedSource,
-        viewportWidth: Int,
-        viewportHeight: Int,
-    ): Boolean {
+    /**
+     * Whether the page should be rotated clockwise for the reader's auto-rotate-page option.
+     *
+     * This intentionally depends only on the page itself. Reader/activity orientation and
+     * transient holder dimensions must not affect the result, otherwise recycled holders can
+     * make the same page flip orientation while paging back and forth.
+     */
+    fun shouldAutoRotatePage(imageSource: BufferedSource): Boolean {
         val options = extractImageOptions(imageSource)
-        return shouldRotateToMatchViewport(
+        return PageRotationCalculator.shouldRotatePage(
             imageWidth = options.outWidth,
             imageHeight = options.outHeight,
-            viewportWidth = viewportWidth,
-            viewportHeight = viewportHeight,
         )
     }
-
-    internal fun shouldRotateToMatchViewport(
-        imageWidth: Int,
-        imageHeight: Int,
-        viewportWidth: Int,
-        viewportHeight: Int,
-    ): Boolean = PageRotationCalculator.shouldRotateToMatchViewport(
-        imageWidth = imageWidth,
-        imageHeight = imageHeight,
-        viewportWidth = viewportWidth,
-        viewportHeight = viewportHeight,
-    )
 
     /**
      * Check whether a wide image is a stitched two-page scan (and therefore safe

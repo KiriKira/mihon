@@ -21,6 +21,19 @@ plugins {
     alias(mihonx.plugins.spotless)
 }
 
+// The archived arkon/FlexibleAdapter fork is no longer reliably available from
+// JitPack. Substitute the maintained Maven Central artifact so CI and clean
+// builds do not depend on the archived commit being available.
+subprojects {
+    configurations.configureEach {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("com.github.arkon.FlexibleAdapter:flexible-adapter"))
+                .using(module("eu.davidea:flexible-adapter:5.1.0"))
+                .because("the archived JitPack fork is no longer resolvable")
+        }
+    }
+}
+
 val buildLogic: IncludedBuild = gradle.includedBuild("build-logic")
 tasks {
     listOf("clean", "spotlessApply", "spotlessCheck").forEach { task ->

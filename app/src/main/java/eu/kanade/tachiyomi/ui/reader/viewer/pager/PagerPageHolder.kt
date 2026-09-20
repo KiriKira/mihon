@@ -150,13 +150,11 @@ class PagerPageHolder(
         progressIndicator?.setProgress(0)
 
         val streamFn = page.stream ?: return
-        val viewportWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
-        val viewportHeight = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
 
         try {
             val (source, isAnimated, background) = withIOContext {
                 val source = streamFn().use {
-                    process(item, Buffer().readFrom(it), viewportWidth, viewportHeight)
+                    process(item, Buffer().readFrom(it))
                 }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 val background = if (!isAnimated && viewer.config.automaticBackground) {
@@ -194,8 +192,6 @@ class PagerPageHolder(
     private suspend fun process(
         page: ReaderPage,
         imageSource: BufferedSource,
-        viewportWidth: Int,
-        viewportHeight: Int,
     ): BufferedSource {
         val displayedPage = when {
             !viewer.config.dualPageSplit -> imageSource
@@ -210,11 +206,7 @@ class PagerPageHolder(
 
         val rotation = when {
             viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(displayedPage)
-            viewer.config.pageAutoRotate && ImageUtil.shouldRotateToMatchViewport(
-                displayedPage,
-                viewportWidth,
-                viewportHeight,
-            ) -> 90f
+            viewer.config.pageAutoRotate && ImageUtil.shouldAutoRotatePage(displayedPage) -> 90f
             else -> 0f
         }
         return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)

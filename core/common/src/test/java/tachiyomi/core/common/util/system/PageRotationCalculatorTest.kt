@@ -7,20 +7,19 @@ import org.junit.jupiter.api.Test
 class PageRotationCalculatorTest {
 
     @Test
-    fun `rotates when page and viewport orientations differ`() {
-        assertTrue(PageRotationCalculator.shouldRotateToMatchViewport(2400, 1600, 1080, 2400))
-        assertTrue(PageRotationCalculator.shouldRotateToMatchViewport(1600, 2400, 2400, 1080))
+    fun `rotates landscape pages`() {
+        assertTrue(PageRotationCalculator.shouldRotatePage(2400, 1600))
     }
 
     @Test
-    fun `does not rotate when page and viewport orientations match`() {
-        assertFalse(PageRotationCalculator.shouldRotateToMatchViewport(1600, 2400, 1080, 2400))
-        assertFalse(PageRotationCalculator.shouldRotateToMatchViewport(2400, 1600, 2400, 1080))
+    fun `does not rotate portrait pages`() {
+        assertFalse(PageRotationCalculator.shouldRotatePage(1600, 2400))
     }
 
     @Test
     fun `does not rotate square or invalid dimensions`() {
-        assertFalse(PageRotationCalculator.shouldRotateToMatchViewport(1000, 1000, 1080, 2400))
-        assertFalse(PageRotationCalculator.shouldRotateToMatchViewport(1000, 1500, 0, 2400))
+        assertFalse(PageRotationCalculator.shouldRotatePage(1000, 1000))
+        assertFalse(PageRotationCalculator.shouldRotatePage(0, 1500))
+        assertFalse(PageRotationCalculator.shouldRotatePage(1500, 0))
     }
 }

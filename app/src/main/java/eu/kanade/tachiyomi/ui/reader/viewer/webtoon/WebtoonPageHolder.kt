@@ -190,13 +190,11 @@ class WebtoonPageHolder(
         progressIndicator.setProgress(0)
 
         val streamFn = page?.stream ?: return
-        val viewportWidth = viewer.recycler.width.takeIf { it > 0 } ?: Resources.getSystem().displayMetrics.widthPixels
-        val viewportHeight = parentHeight.takeIf { it > 0 } ?: Resources.getSystem().displayMetrics.heightPixels
 
         try {
             val (source, isAnimated) = withIOContext {
                 val source = streamFn().use {
-                    process(Buffer().readFrom(it), viewportWidth, viewportHeight)
+                    process(Buffer().readFrom(it))
                 }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 Pair(source, isAnimated)
@@ -223,8 +221,6 @@ class WebtoonPageHolder(
 
     private suspend fun process(
         imageSource: BufferedSource,
-        viewportWidth: Int,
-        viewportHeight: Int,
     ): BufferedSource {
         val displayedPage = if (viewer.config.dualPageSplit && ImageUtil.isWideImage(imageSource)) {
             if (viewer.config.dualPageSkipSpread && !isStitchedPage(imageSource)) {
@@ -239,11 +235,7 @@ class WebtoonPageHolder(
 
         val rotation = when {
             viewer.config.pageForceUpright -> PageOrientationDetector.detectCorrection(displayedPage)
-            viewer.config.pageAutoRotate && ImageUtil.shouldRotateToMatchViewport(
-                displayedPage,
-                viewportWidth,
-                viewportHeight,
-            ) -> 90f
+            viewer.config.pageAutoRotate && ImageUtil.shouldAutoRotatePage(displayedPage) -> 90f
             else -> 0f
         }
         return if (rotation == 0f) displayedPage else ImageUtil.rotateImage(displayedPage, rotation)

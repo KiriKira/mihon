@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -858,6 +859,30 @@ class ReaderActivity : BaseActivity() {
         }
 
         return longSide.toFloat() / shortSide <= 1.5f
+    }
+
+    /**
+     * Returns the orientation of the logical reader surface rather than the raw activity.
+     *
+     * On unfolded foldables a portrait reader may be implemented by quarter-turning the whole
+     * reader surface while leaving the activity in its natural landscape orientation.
+     */
+    internal fun isReaderContentPortrait(): Boolean {
+        if (::binding.isInitialized) {
+            val contentWidth = binding.readerContent.width
+            val contentHeight = binding.readerContent.height
+            if (contentWidth > 0 && contentHeight > 0 && contentWidth != contentHeight) {
+                return contentWidth < contentHeight
+            }
+        }
+
+        val physicalPortrait = when (resources.configuration.orientation) {
+            Configuration.ORIENTATION_PORTRAIT -> true
+            Configuration.ORIENTATION_LANDSCAPE -> false
+            else -> resources.displayMetrics.widthPixels < resources.displayMetrics.heightPixels
+        }
+        val quarterTurn = readerContentRotation == 90f || readerContentRotation == -90f
+        return if (quarterTurn) !physicalPortrait else physicalPortrait
     }
 
     /**

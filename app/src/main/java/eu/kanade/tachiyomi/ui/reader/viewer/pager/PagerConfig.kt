@@ -48,6 +48,9 @@ class PagerConfig(
     var landscapeZoom = false
         private set
 
+    var foldableCutoutAvoidance = false
+        private set
+
     init {
         readerPreferences.readerTheme
             .register(
@@ -72,6 +75,9 @@ class PagerConfig(
 
         readerPreferences.landscapeZoom
             .register({ landscapeZoom = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.foldableCutoutAvoidance
+            .register({ foldableCutoutAvoidance = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.navigationModePager
             .register({ navigationMode = it }, { updateNavigation(navigationMode) })

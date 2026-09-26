@@ -79,6 +79,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -858,6 +859,69 @@ class ReaderActivity : BaseActivity() {
         }
 
         return longSide.toFloat() / shortSide <= 1.5f
+    }
+
+    /**
+     * Returns the direction a page should move inside reader coordinates to stay away from the
+     * physical display cutout. The cutout is detected from WindowInsets so this follows the actual
+     * camera side instead of hardcoding a specific foldable model.
+     */
+    internal fun foldableCutoutAvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
+        if (!::binding.isInitialized || !isWideUnfoldedFoldable()) return null
+        if (!readerPreferences.fullscreen.get() || !readerPreferences.drawUnderCutout.get()) return null
+
+        val rootWidth = binding.root.width
+        val rootHeight = binding.root.height
+        if (rootWidth <= 0 || rootHeight <= 0) return null
+
+        val windowInsets = ViewCompat.getRootWindowInsets(binding.root) ?: return null
+        val cutoutSide = windowInsets.displayCutout?.boundingRects
+            .orEmpty()
+            .filterNot { it.isEmpty }
+            .mapNotNull { rect ->
+                listOf(
+                    ReaderPageImageView.CutoutAvoidanceDirection.LEFT to rect.left,
+                    ReaderPageImageView.CutoutAvoidanceDirection.UP to rect.top,
+                    ReaderPageImageView.CutoutAvoidanceDirection.RIGHT to (rootWidth - rect.right),
+                    ReaderPageImageView.CutoutAvoidanceDirection.DOWN to (rootHeight - rect.bottom),
+                ).minByOrNull { it.second }
+            }
+            .minByOrNull { it.second }
+            ?.first
+            ?: windowInsets.getInsets(WindowInsetsCompat.Type.displayCutout()).let { insets ->
+                listOf(
+                    ReaderPageImageView.CutoutAvoidanceDirection.LEFT to insets.left,
+                    ReaderPageImageView.CutoutAvoidanceDirection.UP to insets.top,
+                    ReaderPageImageView.CutoutAvoidanceDirection.RIGHT to insets.right,
+                    ReaderPageImageView.CutoutAvoidanceDirection.DOWN to insets.bottom,
+                ).filter { it.second > 0 }
+                    .maxByOrNull { it.second }
+                    ?.first
+            }
+            ?: return null
+
+        val physicalAvoidance = when (cutoutSide) {
+            ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+            ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+            ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.UP
+        }
+
+        return when (readerContentRotation) {
+            -90f -> when (physicalAvoidance) {
+                ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.UP
+                ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+            }
+            90f -> when (physicalAvoidance) {
+                ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.UP
+                ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+            }
+            else -> physicalAvoidance
+        }
     }
 
     /**

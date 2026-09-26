@@ -105,6 +105,11 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
     )
 
     CheckboxItem(
+        label = "折叠屏自动防摄像头遮挡 / Foldable camera avoidance",
+        pref = viewModel.preferences.foldableCutoutAvoidance,
+    )
+
+    CheckboxItem(
         label = stringResource(MR.strings.pref_navigate_pan),
         pref = viewModel.preferences.navigateToPan,
     )

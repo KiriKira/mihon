@@ -84,6 +84,11 @@ class ReaderPreferences(
 
     val landscapeZoom: Preference<Boolean> = preferenceStore.getBoolean("landscape_zoom", true)
 
+    val foldableCutoutAvoidance: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_foldable_cutout_avoidance",
+        false,
+    )
+
     val cropBordersWebtoon: Preference<Boolean> = preferenceStore.getBoolean("crop_borders_webtoon", false)
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)

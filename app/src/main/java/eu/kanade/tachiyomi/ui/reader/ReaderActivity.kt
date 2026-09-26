@@ -863,12 +863,18 @@ class ReaderActivity : BaseActivity() {
 
     /**
      * Returns the direction a page should move inside reader coordinates to stay away from the
-     * physical display cutout. The cutout is detected from WindowInsets so this follows the actual
-     * camera side instead of hardcoding a specific foldable model.
+     * physical display cutout.
+     *
+     * Some Galaxy Z Fold8 builds do not expose the inner punch-hole through DisplayCutout in the
+     * same coordinate space as the manually rotated reader surface. For that device family, use the
+     * known camera placement relative to the reader posture so avoidance remains deterministic.
+     * Other foldables continue to use the actual WindowInsets cutout geometry.
      */
     internal fun foldableCutoutAvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
         if (!::binding.isInitialized || !isWideUnfoldedFoldable()) return null
         if (!readerPreferences.fullscreen.get() || !readerPreferences.drawUnderCutout.get()) return null
+
+        galaxyZFold8AvoidanceDirection()?.let { return it }
 
         val rootWidth = binding.root.width
         val rootHeight = binding.root.height
@@ -921,6 +927,18 @@ class ReaderActivity : BaseActivity() {
                 ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
             }
             else -> physicalAvoidance
+        }
+    }
+
+    private fun galaxyZFold8AvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
+        val isFold8 = Build.MODEL.startsWith("SM-F971", ignoreCase = true) ||
+            Build.DEVICE.contains("h8q", ignoreCase = true)
+        if (!isFold8) return null
+
+        return when (readerContentRotation) {
+            -90f -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+            90f -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+            else -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
         }
     }
 

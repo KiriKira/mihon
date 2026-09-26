@@ -248,6 +248,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 object : SubsamplingScaleImageView.OnStateChangedListener {
                     override fun onScaleChanged(newScale: Float, origin: Int) {
                         this@ReaderPageImageView.onScaleChanged(newScale)
+                        applyCutoutAvoidance()
                     }
 
                     override fun onCenterChanged(newCenter: PointF?, origin: Int) {
@@ -285,6 +286,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
                 override fun onReady() {
                     setupZoom(config)
+                    applyCutoutAvoidance()
                     if (isVisibleOnScreen()) landscapeZoom(true)
                     this@ReaderPageImageView.onImageLoaded()
                 }
@@ -371,6 +373,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 )
                 setOnScaleChangeListener { _, _, _ ->
                     this@ReaderPageImageView.onScaleChanged(scale)
+                    applyCutoutAvoidance()
                 }
             }
         }
@@ -395,6 +398,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     setImageDrawable(drawable)
                     (drawable as? Animatable)?.start()
                     isVisible = true
+                    post { applyCutoutAvoidance() }
                     this@ReaderPageImageView.onImageLoaded()
                 },
             )
@@ -406,6 +410,40 @@ open class ReaderPageImageView @JvmOverloads constructor(
             .crossfade(false)
             .build()
         context.imageLoader.enqueue(request)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        post { applyCutoutAvoidance() }
+    }
+
+    private fun applyCutoutAvoidance() {
+        val view = pageView ?: return
+        view.translationX = 0f
+        view.translationY = 0f
+
+        val direction = config?.cutoutAvoidanceDirectionProvider?.invoke() ?: return
+        val displayedSize = when (view) {
+            is SubsamplingScaleImageView -> {
+                if (!view.isReady || view.scale <= 0f) return
+                (view.sWidth * view.scale) to (view.sHeight * view.scale)
+            }
+            is PhotoView -> {
+                val displayRect = view.displayRect ?: return
+                displayRect.width() to displayRect.height()
+            }
+            else -> return
+        }
+
+        val horizontalSlack = (view.width.toFloat() - displayedSize.first).coerceAtLeast(0f)
+        val verticalSlack = (view.height.toFloat() - displayedSize.second).coerceAtLeast(0f)
+
+        when (direction) {
+            CutoutAvoidanceDirection.LEFT -> view.translationX = -horizontalSlack / 2f
+            CutoutAvoidanceDirection.RIGHT -> view.translationX = horizontalSlack / 2f
+            CutoutAvoidanceDirection.UP -> view.translationY = -verticalSlack / 2f
+            CutoutAvoidanceDirection.DOWN -> view.translationY = verticalSlack / 2f
+        }
     }
 
     private fun Int.getSystemScaledDuration(): Int {
@@ -421,7 +459,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val cropBorders: Boolean = false,
         val zoomStartPosition: ZoomStartPosition = ZoomStartPosition.CENTER,
         val landscapeZoom: Boolean = false,
+        val cutoutAvoidanceDirectionProvider: (() -> CutoutAvoidanceDirection?)? = null,
     )
+
+    enum class CutoutAvoidanceDirection {
+        LEFT,
+        RIGHT,
+        UP,
+        DOWN,
+    }
 
     enum class ZoomStartPosition {
         LEFT,

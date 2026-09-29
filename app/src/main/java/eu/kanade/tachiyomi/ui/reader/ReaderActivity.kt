@@ -921,16 +921,24 @@ class ReaderActivity : BaseActivity() {
             return if (isWideUnfolded) {
                 when (readerContentRotation) {
                     -90f -> when (physicalAvoidance) {
-                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.UP
-                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
-                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
-                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.UP
+                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
                     }
                     90f -> when (physicalAvoidance) {
-                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
-                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.UP
-                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
-                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->\n                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.UP
+                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
                     }
                     else -> physicalAvoidance
                 }

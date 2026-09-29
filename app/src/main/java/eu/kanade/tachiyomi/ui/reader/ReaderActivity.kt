@@ -865,23 +865,28 @@ class ReaderActivity : BaseActivity() {
      * Returns the direction a page should move inside reader coordinates to stay away from the
      * physical display cutout.
      *
-     * Some Galaxy Z Fold8 builds do not expose the inner punch-hole through DisplayCutout in the
-     * same coordinate space as the manually rotated reader surface. For that device family, use the
-     * known camera placement relative to the reader posture so avoidance remains deterministic.
-     * Other foldables continue to use the actual WindowInsets cutout geometry.
+     * The cover display uses the real DisplayCutout geometry when available. Some Galaxy Z Fold8
+     * builds do not expose the inner punch-hole through DisplayCutout in the same coordinate space
+     * as the manually rotated reader surface, so the unfolded display keeps a posture-aware
+     * fallback. The Fold8 cover display also has a portrait fallback because its camera is at the
+     * physical top edge.
      */
     internal fun foldableCutoutAvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
-        if (!::binding.isInitialized || !isWideUnfoldedFoldable()) return null
+        if (!::binding.isInitialized) return null
         if (!readerPreferences.fullscreen.get() || !readerPreferences.drawUnderCutout.get()) return null
+        if (!packageManager.hasSystemFeature("android.hardware.sensor.hinge_angle")) return null
 
-        galaxyZFold8AvoidanceDirection()?.let { return it }
+        val isWideUnfolded = isWideUnfoldedFoldable()
+        if (isWideUnfolded) {
+            galaxyZFold8UnfoldedAvoidanceDirection()?.let { return it }
+        }
 
         val rootWidth = binding.root.width
         val rootHeight = binding.root.height
         if (rootWidth <= 0 || rootHeight <= 0) return null
 
-        val windowInsets = ViewCompat.getRootWindowInsets(binding.root) ?: return null
-        val cutoutSide = windowInsets.displayCutout?.boundingRects
+        val windowInsets = ViewCompat.getRootWindowInsets(binding.root)
+        val cutoutSide = windowInsets?.displayCutout?.boundingRects
             .orEmpty()
             .filterNot { it.isEmpty }
             .mapNotNull { rect ->
@@ -894,7 +899,7 @@ class ReaderActivity : BaseActivity() {
             }
             .minByOrNull { it.second }
             ?.first
-            ?: windowInsets.getInsets(WindowInsetsCompat.Type.displayCutout()).let { insets ->
+            ?: windowInsets?.getInsets(WindowInsetsCompat.Type.displayCutout())?.let { insets ->
                 listOf(
                     ReaderPageImageView.CutoutAvoidanceDirection.LEFT to insets.left,
                     ReaderPageImageView.CutoutAvoidanceDirection.UP to insets.top,
@@ -904,42 +909,68 @@ class ReaderActivity : BaseActivity() {
                     .maxByOrNull { it.second }
                     ?.first
             }
-            ?: return null
 
-        val physicalAvoidance = when (cutoutSide) {
-            ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
-            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
-            ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
-            ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.UP
+        if (cutoutSide != null) {
+            val physicalAvoidance = when (cutoutSide) {
+                ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.UP
+            }
+
+            return if (isWideUnfolded) {
+                when (readerContentRotation) {
+                    -90f -> when (physicalAvoidance) {
+                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.UP
+                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                    }
+                    90f -> when (physicalAvoidance) {
+                        ReaderPageImageView.CutoutAvoidanceDirection.LEFT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+                        ReaderPageImageView.CutoutAvoidanceDirection.RIGHT ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.UP
+                        ReaderPageImageView.CutoutAvoidanceDirection.UP ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.LEFT
+                        ReaderPageImageView.CutoutAvoidanceDirection.DOWN ->
+                            ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
+                    }
+                    else -> physicalAvoidance
+                }
+            } else {
+                physicalAvoidance
+            }
         }
 
-        return when (readerContentRotation) {
-            -90f -> when (physicalAvoidance) {
-                ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.UP
-                ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
-                ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
-                ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
-            }
-            90f -> when (physicalAvoidance) {
-                ReaderPageImageView.CutoutAvoidanceDirection.LEFT -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
-                ReaderPageImageView.CutoutAvoidanceDirection.RIGHT -> ReaderPageImageView.CutoutAvoidanceDirection.UP
-                ReaderPageImageView.CutoutAvoidanceDirection.UP -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
-                ReaderPageImageView.CutoutAvoidanceDirection.DOWN -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
-            }
-            else -> physicalAvoidance
-        }
+        return galaxyZFold8CoverDisplayAvoidanceDirection(rootWidth, rootHeight)
     }
 
-    private fun galaxyZFold8AvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
-        val isFold8 = Build.MODEL.startsWith("SM-F971", ignoreCase = true) ||
-            Build.DEVICE.contains("h8q", ignoreCase = true)
-        if (!isFold8) return null
+    private fun galaxyZFold8UnfoldedAvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
+        if (!isGalaxyZFold8()) return null
 
         return when (readerContentRotation) {
             -90f -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
             90f -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
             else -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
         }
+    }
+
+    private fun galaxyZFold8CoverDisplayAvoidanceDirection(
+        rootWidth: Int,
+        rootHeight: Int,
+    ): ReaderPageImageView.CutoutAvoidanceDirection? {
+        if (!isGalaxyZFold8() || rootHeight <= rootWidth) return null
+        return ReaderPageImageView.CutoutAvoidanceDirection.DOWN
+    }
+
+    private fun isGalaxyZFold8(): Boolean {
+        return Build.MODEL.startsWith("SM-F971", ignoreCase = true) ||
+            Build.DEVICE.contains("h8q", ignoreCase = true)
     }
 
     /**

@@ -99,6 +99,17 @@ class ReaderPreferences(
         false,
     )
 
+    val foldableSystemRotation: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_foldable_system_rotation",
+        false,
+    )
+
+    // "autoRotate,userRotation" captured before the reader locked the system rotation.
+    val foldableSavedSystemRotation: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("foldable_saved_system_rotation"),
+        "",
+    )
+
     val cropBordersWebtoon: Preference<Boolean> = preferenceStore.getBoolean("crop_borders_webtoon", false)
 
     val webtoonSidePadding: Preference<Int> = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)

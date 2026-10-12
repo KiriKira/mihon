@@ -1,5 +1,6 @@
 package eu.kanade.presentation.reader.settings
 
+import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.FilterChip
@@ -7,6 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import eu.kanade.tachiyomi.ui.reader.FoldableSystemRotation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
@@ -109,6 +111,22 @@ internal fun ColumnScope.GeneralPage(viewModel: ReaderSettingsViewModel) {
         CheckboxItem(
             label = stringResource(MR.strings.pref_cutout_short),
             pref = viewModel.preferences.drawUnderCutout,
+        )
+    }
+
+    val activity = LocalActivity.current
+    if (activity?.packageManager?.hasSystemFeature("android.hardware.sensor.hinge_angle") == true) {
+        val foldableSystemRotation by viewModel.preferences.foldableSystemRotation.collectAsState()
+        CheckboxItem(
+            label = "折叠屏旋转整个系统界面 / Rotate system UI on foldables",
+            checked = foldableSystemRotation,
+            onClick = {
+                val enabled = !foldableSystemRotation
+                viewModel.preferences.foldableSystemRotation.set(enabled)
+                if (enabled && !Settings.System.canWrite(activity)) {
+                    activity.startActivity(FoldableSystemRotation.permissionIntent(activity))
+                }
+            },
         )
     }
 

@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.View
 import android.view.View.LAYER_TYPE_HARDWARE
 import android.view.WindowManager
@@ -50,7 +51,7 @@ import androidx.lifecycle.lifecycleScope
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.google.android.material.transition.platform.MaterialContainerTransform
 import com.hippo.unifile.UniFile
-import eu.kanade.core.util.ifSourcesLoaded
+import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
@@ -62,7 +63,7 @@ import eu.kanade.presentation.reader.appbars.ReaderAppBars
 import eu.kanade.presentation.reader.components.ChapterNavigatorType
 import eu.kanade.presentation.reader.settings.ReaderSettingsDialog
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
+import eu.kanade.tachiyomi.data.coil.ImageDecoder
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.databinding.ReaderActivityBinding
@@ -83,11 +84,12 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
-import eu.kanade.tachiyomi.util.system.isNightMode
 import eu.kanade.tachiyomi.util.system.openInBrowser
+import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.setComposeContent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -98,19 +100,19 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import logcat.LogPriority
+import mihon.app.di.AppGraph
+import mihon.core.metro.metroGraph
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.stringResource
-import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.util.collectAsState
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.io.ByteArrayOutputStream
 import kotlin.time.Duration.Companion.seconds
 
 class ReaderActivity : BaseActivity() {
+
+    private val graph: AppGraph by lazy { metroGraph() }
 
     companion object {
         fun newIntent(context: Context, mangaId: Long?, chapterId: Long?): Intent {
@@ -122,12 +124,13 @@ class ReaderActivity : BaseActivity() {
         }
     }
 
-    private val readerPreferences = Injekt.get<ReaderPreferences>()
-    private val preferences = Injekt.get<BasePreferences>()
+    @Inject private lateinit var readerPreferences: ReaderPreferences
+
+    @Inject private lateinit var preferences: BasePreferences
 
     lateinit var binding: ReaderActivityBinding
 
-    val viewModel by viewModels<ReaderViewModel>()
+    val viewModel by viewModels<ReaderViewModel> { graph.viewModelFactory }
     private var assistUrl: String? = null
 
     /**
@@ -140,6 +143,17 @@ class ReaderActivity : BaseActivity() {
     private val displayRefreshHost = DisplayRefreshHost()
     private var readerContentRotation = 0f
 
+    /** Reader orientation preference last applied through [setOrientation]. */
+    private var currentOrientation: Int? = null
+
+    /**
+     * Rotation of the reader relative to the display's natural orientation on unfolded foldables,
+     * whether it is applied by rotating the views or by locking the system rotation.
+     */
+    private var foldableOrientationRotation = 0f
+
+    private val foldableSystemRotation by lazy { FoldableSystemRotation(this, readerPreferences) }
+
     private val windowInsetsController by lazy { WindowInsetsControllerCompat(window, window.decorView) }
 
     private var loadingIndicator: ReaderProgressIndicator? = null
@@ -151,6 +165,7 @@ class ReaderActivity : BaseActivity() {
      * Called when the activity is created. Initializes the presenter and configuration.
      */
     override fun onCreate(savedInstanceState: Bundle?) {
+        graph.inject(this)
         registerSecureActivity(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(
@@ -191,6 +206,11 @@ class ReaderActivity : BaseActivity() {
 
         config = ReaderConfig()
         setMenuVisibility(viewModel.state.value.menuVisible)
+
+        readerPreferences.foldableSystemRotation.changes()
+            .drop(1)
+            .onEach { currentOrientation?.let(::setOrientation) }
+            .launchIn(lifecycleScope)
 
         // Finish when incognito mode is disabled
         preferences.incognitoMode.changes()
@@ -262,6 +282,7 @@ class ReaderActivity : BaseActivity() {
                 readerState = viewModel.state,
                 onChangeReadingMode = viewModel::setMangaReadingMode,
                 onChangeOrientation = viewModel::setMangaOrientationType,
+                preferences = readerPreferences,
             )
         }
 
@@ -352,10 +373,25 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
-        lifecycleScope.launchNonCancellable {
-            viewModel.updateHistory()
+        viewModel.saveHistory()
+        if (isFinishing) {
+            foldableSystemRotation.restore()
         }
         super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Re-lock the system rotation released in onStop, or pick up a permission granted meanwhile
+        currentOrientation?.let(::setOrientation)
+    }
+
+    override fun onStop() {
+        // Locking the rotation recreates the activity, keep the lock across that recreation
+        if (!isChangingConfigurations) {
+            foldableSystemRotation.restore()
+        }
+        super.onStop()
     }
 
     /**
@@ -455,11 +491,7 @@ class ReaderActivity : BaseActivity() {
 
     @Composable
     fun AppBars(state: ReaderViewModel.State) {
-        if (!ifSourcesLoaded()) {
-            return
-        }
-
-        val isHttpSource = viewModel.getSource() is HttpSource
+        val isHttpSource = state.source is HttpSource
 
         val cropBorderPaged by readerPreferences.cropBorders.collectAsState()
         val cropBorderWebtoon by readerPreferences.cropBordersWebtoon.collectAsState()
@@ -632,7 +664,7 @@ class ReaderActivity : BaseActivity() {
         binding.readerContainer.removeView(loadingIndicator)
         viewModel.state.value.viewer?.setChapters(viewerChapters)
 
-        lifecycleScope.launchIO {
+        lifecycleScope.launch(Dispatchers.IO) {
             viewModel.getChapterUrl()?.let { url ->
                 assistUrl = url
             }
@@ -717,7 +749,7 @@ class ReaderActivity : BaseActivity() {
      * the viewer is reaching the beginning or end of a chapter or the transition page is active.
      */
     fun requestPreloadChapter(chapter: ReaderChapter) {
-        lifecycleScope.launchIO { viewModel.preload(chapter) }
+        lifecycleScope.launch(Dispatchers.IO) { viewModel.preload(chapter) }
     }
 
     /**
@@ -803,8 +835,12 @@ class ReaderActivity : BaseActivity() {
      * For near-square foldable inner displays, keep the activity in the display's natural
      * orientation and rotate the complete reader surface instead. This preserves a full-screen
      * portrait layout while also letting Android transform touch coordinates with the content.
+     *
+     * When allowed, the system rotation is locked instead so that the system bars, gestures and
+     * dialogs are rotated together with the reader. See [FoldableSystemRotation].
      */
     private fun setOrientation(orientation: Int) {
+        currentOrientation = orientation
         val newOrientation = ReaderOrientation.fromPreference(orientation)
         val foldableRotation = if (isWideUnfoldedFoldable()) {
             when (newOrientation) {
@@ -826,17 +862,38 @@ class ReaderActivity : BaseActivity() {
             null
         }
 
+        foldableOrientationRotation = foldableRotation ?: 0f
+
         if (foldableRotation != null) {
-            setReaderContentRotation(foldableRotation)
+            val systemRotated = readerPreferences.foldableSystemRotation.get() &&
+                foldableSystemRotation.lock(foldableDisplayRotation(foldableRotation))
+            if (!systemRotated) {
+                foldableSystemRotation.restore()
+            }
+            setReaderContentRotation(if (systemRotated) 0f else foldableRotation)
             if (requestedOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
             return
         }
 
+        foldableSystemRotation.restore()
         setReaderContentRotation(0f)
         if (newOrientation.flag != requestedOrientation) {
             requestedOrientation = newOrientation.flag
+        }
+    }
+
+    /**
+     * Maps a reader content rotation to the equivalent `Surface.ROTATION_*` of the display.
+     * A content rotation of -90 degrees matches the device being turned 90 degrees clockwise,
+     * which the system renders as [Surface.ROTATION_270].
+     */
+    private fun foldableDisplayRotation(contentRotation: Float): Int {
+        return when (contentRotation) {
+            -90f -> Surface.ROTATION_270
+            90f -> Surface.ROTATION_90
+            else -> Surface.ROTATION_0
         }
     }
 
@@ -953,7 +1010,7 @@ class ReaderActivity : BaseActivity() {
     private fun galaxyZFold8UnfoldedAvoidanceDirection(): ReaderPageImageView.CutoutAvoidanceDirection? {
         if (!isGalaxyZFold8()) return null
 
-        return when (readerContentRotation) {
+        return when (foldableOrientationRotation) {
             -90f -> ReaderPageImageView.CutoutAvoidanceDirection.LEFT
             90f -> ReaderPageImageView.CutoutAvoidanceDirection.RIGHT
             else -> ReaderPageImageView.CutoutAvoidanceDirection.DOWN
@@ -1083,22 +1140,13 @@ class ReaderActivity : BaseActivity() {
             }
         }
 
-        private val grayBackgroundColor = Color.rgb(0x20, 0x21, 0x25)
-
         /*
          * Initializes the reader subscriptions.
          */
         init {
             readerPreferences.readerTheme.changes()
                 .onEach { theme ->
-                    binding.readerContainer.setBackgroundColor(
-                        when (theme) {
-                            0 -> Color.WHITE
-                            2 -> grayBackgroundColor
-                            3 -> automaticBackgroundColor()
-                            else -> Color.BLACK
-                        },
-                    )
+                    binding.readerContainer.setBackgroundColor(baseContext.readerBackgroundColor(theme))
                 }
                 .launchIn(lifecycleScope)
 
@@ -1134,17 +1182,6 @@ class ReaderActivity : BaseActivity() {
         }
 
         /**
-         * Picks background color for [ReaderActivity] based on light/dark theme preference
-         */
-        private fun automaticBackgroundColor(): Int {
-            return if (baseContext.isNightMode()) {
-                grayBackgroundColor
-            } else {
-                Color.WHITE
-            }
-        }
-
-        /**
          * Sets the display profile to [path].
          */
         private fun setDisplayProfile(path: String) {
@@ -1159,7 +1196,7 @@ class ReaderActivity : BaseActivity() {
                 }
                 val data = outputStream.toByteArray()
                 SubsamplingScaleImageView.setDisplayProfile(data)
-                TachiyomiImageDecoder.displayProfile = data
+                ImageDecoder.displayProfile = data
             }
         }
 

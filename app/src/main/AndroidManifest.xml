@@ -15,6 +15,10 @@
     <!-- For background jobs -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Lock the system rotation while reading on unfolded foldables -->
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- For managing extensions -->
@@ -197,6 +201,17 @@
                 <data android:host="myanimelist-auth" />
                 <data android:host="shikimori-auth" />
                 <data android:host="hikka-auth" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- Comick requires native reverse-domain schemes  -->
+                <data android:scheme="app.mihon" />
+                <data android:host="comick-auth" />
             </intent-filter>
         </activity>
 

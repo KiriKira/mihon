@@ -122,6 +122,12 @@ class ReaderActivity : BaseActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
         }
+
+        private const val FOLDABLE_ROTATION_VERIFY_DELAY_MS = 1500L
+
+        // Kept across the activity recreation caused by the rotation itself
+        private var foldableSystemRotationIgnored = false
+        private var foldableRotationNoticeShown = false
     }
 
     @Inject private lateinit var readerPreferences: ReaderPreferences
@@ -209,7 +215,11 @@ class ReaderActivity : BaseActivity() {
 
         readerPreferences.foldableSystemRotation.changes()
             .drop(1)
-            .onEach { currentOrientation?.let(::setOrientation) }
+            .onEach {
+                foldableSystemRotationIgnored = false
+                foldableRotationNoticeShown = false
+                currentOrientation?.let(::setOrientation)
+            }
             .launchIn(lifecycleScope)
 
         // Finish when incognito mode is disabled
@@ -866,7 +876,7 @@ class ReaderActivity : BaseActivity() {
 
         if (foldableRotation != null) {
             val systemRotated = readerPreferences.foldableSystemRotation.get() &&
-                foldableSystemRotation.lock(foldableDisplayRotation(foldableRotation))
+                lockFoldableSystemRotation(foldableDisplayRotation(foldableRotation))
             if (!systemRotated) {
                 foldableSystemRotation.restore()
             }
@@ -883,6 +893,43 @@ class ReaderActivity : BaseActivity() {
             requestedOrientation = newOrientation.flag
         }
     }
+
+    /**
+     * Locks the system rotation, explaining once per process why it couldn't be applied. If the
+     * system accepts the setting but doesn't rotate the display, falls back to view rotation.
+     */
+    private fun lockFoldableSystemRotation(rotation: Int): Boolean {
+        if (foldableSystemRotationIgnored) return false
+        if (!foldableSystemRotation.canWriteSettings()) {
+            showFoldableRotationNotice("未授予“修改系统设置”权限，仅旋转漫画内容 / Permission missing")
+            return false
+        }
+        if (!foldableSystemRotation.lock(rotation)) {
+            showFoldableRotationNotice("系统拒绝了旋转锁定，仅旋转漫画内容 / Rotation lock rejected")
+            return false
+        }
+        if (currentDisplayRotation() != rotation) {
+            binding.root.postDelayed(
+                {
+                    if (isDestroyed || currentDisplayRotation() == rotation) return@postDelayed
+                    foldableSystemRotationIgnored = true
+                    showFoldableRotationNotice("系统未应用旋转锁定，仅旋转漫画内容 / System ignored rotation lock")
+                    currentOrientation?.let(::setOrientation)
+                },
+                FOLDABLE_ROTATION_VERIFY_DELAY_MS,
+            )
+        }
+        return true
+    }
+
+    private fun showFoldableRotationNotice(message: String) {
+        if (foldableRotationNoticeShown) return
+        foldableRotationNoticeShown = true
+        toast(message, Toast.LENGTH_LONG)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int = windowManager.defaultDisplay.rotation
 
     /**
      * Maps a reader content rotation to the equivalent `Surface.ROTATION_*` of the display.

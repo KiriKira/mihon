@@ -1,5 +1,7 @@
 package eu.kanade.presentation.reader.settings
 
+import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -11,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
+import eu.kanade.tachiyomi.ui.reader.FoldableSystemRotation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
@@ -53,12 +56,33 @@ internal fun ColumnScope.ReadingModePage(viewModel: ReaderSettingsViewModel) {
         }
     }
 
+    FoldableSystemRotationItem(viewModel)
+
     val viewer by viewModel.viewerFlow.collectAsState()
     if (viewer is WebtoonViewer) {
         WebtoonViewerSettings(viewModel)
     } else {
         PagerViewerSettings(viewModel)
     }
+}
+
+@Composable
+private fun FoldableSystemRotationItem(viewModel: ReaderSettingsViewModel) {
+    val activity = LocalActivity.current ?: return
+    if (!activity.packageManager.hasSystemFeature("android.hardware.sensor.hinge_angle")) return
+
+    val pref = viewModel.preferences.foldableSystemRotation
+    val enabled by pref.collectAsState()
+    CheckboxItem(
+        label = "折叠屏旋转整个系统界面（需授予修改系统设置权限）/ Rotate system UI on foldables",
+        checked = enabled,
+        onClick = {
+            pref.set(!enabled)
+            if (!enabled && !Settings.System.canWrite(activity)) {
+                activity.startActivity(FoldableSystemRotation.permissionIntent(activity))
+            }
+        },
+    )
 }
 
 @Composable

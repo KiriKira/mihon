@@ -412,6 +412,12 @@
     <string name="pref_page_auto_rotate_summary">Rotates only the displayed page when its orientation does not match the screen</string>
     <string name="pref_page_force_upright">Force current page upright</string>
     <string name="pref_page_force_upright_summary">Uses on-device Chinese text recognition to correct the displayed page orientation</string>
+    <string name="pref_dual_page_advanced_spread_detection">Enhanced spread detection</string>
+    <string name="pref_foldable_cutout_avoidance">Keep pages clear of the camera on foldables</string>
+    <string name="pref_foldable_system_rotation">Rotate the whole system UI on foldables (requires “Modify system settings”)</string>
+    <string name="foldable_rotation_permission_missing">“Modify system settings” isn’t allowed, only the page is rotated</string>
+    <string name="foldable_rotation_rejected">The system rejected the rotation lock, only the page is rotated</string>
+    <string name="foldable_rotation_ignored">The system ignored the rotation lock, only the page is rotated</string>
     <string name="pref_double_tap_zoom">Double tap to zoom</string>
     <string name="pref_cutout_short">Show content in cutout area</string>
     <string name="pref_page_transitions">Animate page transitions</string>

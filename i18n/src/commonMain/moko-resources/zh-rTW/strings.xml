@@ -674,6 +674,14 @@
     <string name="pref_page_auto_rotate_summary">本頁方向與螢幕不一致時只旋轉圖片，不旋轉應用程式或手機版面</string>
     <string name="pref_page_force_upright">強制本頁正向顯示</string>
     <string name="pref_page_force_upright_summary">在本機根據漢字方向判斷並修正本頁朝向</string>
+    <string name="pref_dual_page_skip_spread">跳過拆分大跨頁</string>
+    <string name="pref_dual_page_skip_spread_summary">自動識別真正的大跨頁（跨頁藝術作品），保留整頁不拆分</string>
+    <string name="pref_dual_page_advanced_spread_detection">增強大跨頁識別</string>
+    <string name="pref_foldable_cutout_avoidance">摺疊螢幕自動避開鏡頭遮擋</string>
+    <string name="pref_foldable_system_rotation">摺疊螢幕旋轉整個系統介面（需授予「修改系統設定」權限）</string>
+    <string name="foldable_rotation_permission_missing">未授予「修改系統設定」權限，僅旋轉漫畫內容</string>
+    <string name="foldable_rotation_rejected">系統拒絕了旋轉鎖定，僅旋轉漫畫內容</string>
+    <string name="foldable_rotation_ignored">系統未套用旋轉鎖定，僅旋轉漫畫內容</string>
     <string name="pref_debug_info">偵錯資訊</string>
     <string name="pref_chapter_swipe_start">向左滑動章節</string>
     <string name="pref_double_tap_zoom">輕觸兩下以縮放</string>

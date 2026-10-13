@@ -51,6 +51,7 @@ import androidx.lifecycle.lifecycleScope
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.google.android.material.transition.platform.MaterialContainerTransform
 import com.hippo.unifile.UniFile
+import dev.icerock.moko.resources.StringResource
 import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
@@ -901,11 +902,11 @@ class ReaderActivity : BaseActivity() {
     private fun lockFoldableSystemRotation(rotation: Int): Boolean {
         if (foldableSystemRotationIgnored) return false
         if (!foldableSystemRotation.canWriteSettings()) {
-            showFoldableRotationNotice("未授予“修改系统设置”权限，仅旋转漫画内容 / Permission missing")
+            showFoldableRotationNotice(MR.strings.foldable_rotation_permission_missing)
             return false
         }
         if (!foldableSystemRotation.lock(rotation)) {
-            showFoldableRotationNotice("系统拒绝了旋转锁定，仅旋转漫画内容 / Rotation lock rejected")
+            showFoldableRotationNotice(MR.strings.foldable_rotation_rejected)
             return false
         }
         if (currentDisplayRotation() != rotation) {
@@ -913,7 +914,7 @@ class ReaderActivity : BaseActivity() {
                 {
                     if (isDestroyed || currentDisplayRotation() == rotation) return@postDelayed
                     foldableSystemRotationIgnored = true
-                    showFoldableRotationNotice("系统未应用旋转锁定，仅旋转漫画内容 / System ignored rotation lock")
+                    showFoldableRotationNotice(MR.strings.foldable_rotation_ignored)
                     currentOrientation?.let(::setOrientation)
                 },
                 FOLDABLE_ROTATION_VERIFY_DELAY_MS,
@@ -922,7 +923,7 @@ class ReaderActivity : BaseActivity() {
         return true
     }
 
-    private fun showFoldableRotationNotice(message: String) {
+    private fun showFoldableRotationNotice(message: StringResource) {
         if (foldableRotationNoticeShown) return
         foldableRotationNoticeShown = true
         toast(message, Toast.LENGTH_LONG)

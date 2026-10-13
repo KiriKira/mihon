@@ -676,6 +676,12 @@
     <string name="pref_page_auto_rotate_summary">本页方向与屏幕不一致时只旋转图片，不旋转应用或手机布局</string>
     <string name="pref_page_force_upright">强制本页正向显示</string>
     <string name="pref_page_force_upright_summary">在本机根据汉字方向判断并修正本页朝向</string>
+    <string name="pref_dual_page_advanced_spread_detection">增强大跨页识别</string>
+    <string name="pref_foldable_cutout_avoidance">折叠屏自动避开摄像头遮挡</string>
+    <string name="pref_foldable_system_rotation">折叠屏旋转整个系统界面（需授予“修改系统设置”权限）</string>
+    <string name="foldable_rotation_permission_missing">未授予“修改系统设置”权限，仅旋转漫画内容</string>
+    <string name="foldable_rotation_rejected">系统拒绝了旋转锁定，仅旋转漫画内容</string>
+    <string name="foldable_rotation_ignored">系统未应用旋转锁定，仅旋转漫画内容</string>
     <string name="pref_debug_info">调试信息</string>
     <string name="pref_chapter_swipe_end">向右滑动章节</string>
     <string name="pref_chapter_swipe_start">向左滑动章节</string>

@@ -74,7 +74,7 @@ private fun FoldableSystemRotationItem(viewModel: ReaderSettingsViewModel) {
     val pref = viewModel.preferences.foldableSystemRotation
     val enabled by pref.collectAsState()
     CheckboxItem(
-        label = "折叠屏旋转整个系统界面（需授予修改系统设置权限）/ Rotate system UI on foldables",
+        label = stringResource(MR.strings.pref_foldable_system_rotation),
         checked = enabled,
         onClick = {
             pref.set(!enabled)
@@ -131,7 +131,7 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
     )
 
     CheckboxItem(
-        label = "折叠屏自动防摄像头遮挡 / Foldable camera avoidance",
+        label = stringResource(MR.strings.pref_foldable_cutout_avoidance),
         pref = viewModel.preferences.foldableCutoutAvoidance,
     )
 
@@ -158,7 +158,7 @@ private fun ColumnScope.PagerViewerSettings(viewModel: ReaderSettingsViewModel) 
         )
         if (skipSpread) {
             CheckboxItem(
-                label = "增强大跨页识别 / Enhanced spread detection",
+                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
                 pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
             )
         }
@@ -232,7 +232,7 @@ private fun ColumnScope.WebtoonViewerSettings(viewModel: ReaderSettingsViewModel
         )
         if (skipSpread) {
             CheckboxItem(
-                label = "增强大跨页识别 / Enhanced spread detection",
+                label = stringResource(MR.strings.pref_dual_page_advanced_spread_detection),
                 pref = viewModel.preferences.dualPageAdvancedSpreadDetection,
             )
         }

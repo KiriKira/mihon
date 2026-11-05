@@ -10,9 +10,9 @@ import kotlin.math.min
  * Opt-in second-stage spread analysis.
  *
  * The legacy [ImageUtil.isWideStitchedPage] result is authoritative unless it says
- * the page is safe to split. Only then do we run the more expensive continuity
- * check, which may veto the split when artwork appears to continue across a real
- * scanned gutter.
+ * the page is safe to split. Only then do we run the more expensive page layout
+ * check, which vetoes the split unless the image looks like two separate pages with
+ * their own margins. See [SpreadPageStructure].
  */
 fun ImageUtil.isWideStitchedPageEnhanced(imageSource: BufferedSource): Boolean {
     if (!isWideStitchedPage(imageSource)) return false
@@ -65,31 +65,9 @@ fun ImageUtil.isWideStitchedPageEnhanced(imageSource: BufferedSource): Boolean {
             luminance[i] = (r * 299 + g * 587 + b * 114) / 1000
         }
 
-        val candidate = DoublePageSpreadDetector.findBestGutterColumn(
-            luminance = luminance,
-            width = width,
-            height = height,
-        )
-        if (!DoublePageSpreadDetector.isStitchedDoublePage(candidate, imageWidth = width)) {
-            return false
-        }
-
-        val gutter = DoublePageSpreadDetector.findGutterRun(
-            luminance = luminance,
-            width = width,
-            height = height,
-            candidate = candidate,
-        )
-        val contextWidth = max(1, (width * 0.03).toInt())
-        val continuity = DoublePageSpreadDetector.analyzeCrossGutterContinuity(
-            luminance = luminance,
-            width = width,
-            height = height,
-            gutter = gutter,
-            contextWidth = contextWidth,
-        )
-
-        !DoublePageSpreadDetector.isLikelyContinuousSpread(continuity)
+        // No light seam to analyse (e.g. a black gutter): keep the legacy decision.
+        val structure = SpreadPageStructure.analyze(luminance, width, height) ?: return true
+        SpreadPageStructure.isTwoPages(structure)
     } finally {
         if (analysisBitmap !== decodedBitmap) {
             analysisBitmap.recycle()

@@ -31,6 +31,9 @@ class PagerConfig(
 
     var dualPageSplitChangedListener: ((Boolean) -> Unit)? = null
 
+    /** Called when a setting that decides which pages get split changes. */
+    var spreadDetectionChangedListener: (() -> Unit)? = null
+
     var imageScaleType = 1
         private set
 
@@ -100,10 +103,13 @@ class PagerConfig(
             .register({ dualPageInvert = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.dualPageSplitSkipSpread
-            .register({ dualPageSkipSpread = it }, { imagePropertyChangedListener?.invoke() })
+            .register({ dualPageSkipSpread = it }, { spreadDetectionChangedListener?.invoke() })
 
         readerPreferences.dualPageAdvancedSpreadDetection
-            .register({ dualPageAdvancedSpreadDetection = it }, { imagePropertyChangedListener?.invoke() })
+            .register(
+                { dualPageAdvancedSpreadDetection = it },
+                { spreadDetectionChangedListener?.invoke() },
+            )
 
         readerPreferences.pageAutoRotatePaged
             .register(

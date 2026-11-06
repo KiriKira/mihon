@@ -15,6 +15,8 @@ With "Split double pages" and "Skip splitting double-page spreads" on, a wide pa
 - **Wide blank seam.** Each scanned page keeps its own inner margin, so two pages leave a blank strip in the middle that is at least 1.5% of the image width. A spread scan usually has a thin gutter of 0.5% or less.
 - **Page margins next to the seam.** Within 8% of the width on each side of the seam, both halves have blank rows at the top or bottom (at least 2% of the height), and at least one half has both. Spreads are drawn up to the edges.
 
+Margins tolerate scan defects: a dark scan edge of up to 1% of the height at the outer edge is skipped, and single noisy rows inside a margin (up to 0.5% of the height in total) do not end it.
+
 Both signals are needed. So a spread with a wider gutter, blank sky at the top, or halves scanned slightly out of line is still kept whole.
 
 Comparing pixels on both sides of the seam was tried before and dropped. The panel borders and white margins of two unrelated pages line up across the seam just as well as continuous artwork does, so every framed page pair looked like a spread.

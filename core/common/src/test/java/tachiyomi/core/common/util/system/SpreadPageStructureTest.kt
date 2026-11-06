@@ -94,6 +94,33 @@ class SpreadPageStructureTest {
     }
 
     @Test
+    fun `dark scan edges at the top and bottom do not hide the margins`() {
+        val pages = twoPages()
+        for (x in 0 until width) {
+            pages[x] = 0
+            pages[(height - 1) * width + x] = 0
+            pages[(height - 2) * width + x] = 0
+        }
+        assertTrue(SpreadPageStructure.isTwoPages(analyze(pages)!!))
+    }
+
+    @Test
+    fun `a stray line of noise inside a margin does not end it`() {
+        val pages = twoPages()
+        for (x in 0 until width) pages[10 * width + x] = 0
+        val structure = analyze(pages)!!
+        assertTrue(structure.left.top >= 20.0 / height)
+        assertTrue(SpreadPageStructure.isTwoPages(structure))
+    }
+
+    @Test
+    fun `artwork reaching the edge is not mistaken for a dark scan edge`() {
+        val structure = analyze(spread(seam = 16))!!
+        assertEquals(0.0, structure.left.top)
+        assertEquals(0.0, structure.right.bottom)
+    }
+
+    @Test
     fun `pages whose inner margins were cropped away are kept whole`() {
         // Known limitation: without a blank seam the layout looks like a spread.
         val structure = analyze(twoPages(innerMargin = 1))!!

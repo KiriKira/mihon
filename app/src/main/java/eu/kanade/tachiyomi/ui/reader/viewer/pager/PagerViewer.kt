@@ -139,6 +139,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             refreshAdapter()
         }
 
+        config.spreadDetectionChangedListener = {
+            // Pages split under the old settings may now be kept whole: drop their second halves
+            // and let the pages split again as they are redrawn.
+            val currentPage = adapter.items.getOrNull(pager.currentItem)
+                .let { if (it is InsertPage) it.parent else it }
+            cleanupPageSplit()
+            refreshAdapter()
+            adapter.items.indexOf(currentPage).takeIf { it >= 0 }?.let { pager.setCurrentItem(it, false) }
+        }
+
         config.navigationModeChangedListener = {
             val showOnStart = config.navigationOverlayOnStart || config.forceNavigationOverlay
             activity.binding.navigationOverlay.setNavigation(config.navigator, showOnStart)

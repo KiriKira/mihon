@@ -45,6 +45,8 @@ internal object SpreadPageStructure {
         maxSeamInkFraction: Double = 0.03,
         stripWidthFraction: Double = 0.08,
         maxBlankRowInkFraction: Double = 0.03,
+        maxEdgeRowsFraction: Double = 0.01,
+        maxNoiseRowsFraction: Double = 0.005,
     ): Structure? {
         require(width > 0) { "width must be positive" }
         require(height > 0) { "height must be positive" }
@@ -90,10 +92,35 @@ internal object SpreadPageStructure {
                 }
                 return true
             }
-            var top = 0
-            while (top < height && isBlankRow(top)) top++
-            var bottom = 0
-            while (bottom < height - top && isBlankRow(height - 1 - bottom)) bottom++
+            val maxEdgeRows = max(1, (height * maxEdgeRowsFraction).toInt())
+            val maxNoiseRows = max(1, (height * maxNoiseRowsFraction).toInt())
+
+            // Count the blank rows of a margin starting at the outer edge, row by row via [rowAt].
+            // A dark scan edge of up to maxEdgeRows rows at the very edge is skipped, and single
+            // non-blank rows (scan noise) are tolerated up to maxNoiseRows in total.
+            fun margin(rowAt: (Int) -> Int): Int {
+                val limit = height / 2
+                var i = 0
+                while (i <= maxEdgeRows && i < limit && !isBlankRow(rowAt(i))) i++
+                // Content reaches the edge: no margin
+                if (i > maxEdgeRows) return 0
+                var blank = 0
+                var noise = 0
+                while (i < limit) {
+                    if (isBlankRow(rowAt(i))) {
+                        blank++
+                    } else if (noise < maxNoiseRows && i + 1 < limit && isBlankRow(rowAt(i + 1))) {
+                        noise++
+                    } else {
+                        break
+                    }
+                    i++
+                }
+                return blank
+            }
+
+            val top = margin { it }
+            val bottom = margin { height - 1 - it }
             return HalfMargins(top.toDouble() / height, bottom.toDouble() / height)
         }
 

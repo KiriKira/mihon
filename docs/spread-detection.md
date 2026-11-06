@@ -1,5 +1,7 @@
 # Double-page spread detection
 
+> Proposed redesign (not implemented): [Mobile spread detection algorithm and integration specification](PLAN-mobile-spread-detection.md). The behavior documented below is the current implementation, not the proposal.
+
 With "Split double pages" and "Skip splitting double-page spreads" on, a wide page is split only when it looks like two pages scanned side by side.
 
 ## Legacy check (always on)

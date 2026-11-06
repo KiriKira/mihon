@@ -1,6 +1,6 @@
 # Double-page spread detection
 
-> Proposed redesign (not implemented): [Mobile spread detection algorithm and integration specification](PLAN-mobile-spread-detection.md). The behavior documented below is the current implementation, not the proposal.
+> Proposed redesign (design only, no classifier): [Mobile spread detection algorithm and integration specification](PLAN-mobile-spread-detection.md). The behavior documented below is the current implementation, not the proposal. A bounded, model-free evidence probe exists on a separate experiment branch ([#18](https://github.com/KiriKira/mihon/pull/18)); it is not called by the reader.
 
 With "Split double pages" and "Skip splitting double-page spreads" on, a wide page is split only when it looks like two pages scanned side by side.
 
